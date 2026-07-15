@@ -4,6 +4,12 @@ set -euo pipefail
 : "${GITHUB_URL:?Set GITHUB_URL, e.g. https://github.com/your-org or https://github.com/you/repo}"
 cd /home/runner/actions-runner
 
+# Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
+# environment automatically. We just surface it in the logs when one is configured.
+if [[ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}" ]]; then
+  echo "Using proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}${NO_PROXY:+ (no_proxy: ${NO_PROXY})}"
+fi
+
 # Resolve org-vs-repo from the URL for the API calls
 path="${GITHUB_URL#https://github.com/}"
 if [[ "$path" == */* ]]; then

@@ -1,2 +1,5 @@
 # Never commit real secrets
 .env
+
+# Compiled manager binary
+/gha
