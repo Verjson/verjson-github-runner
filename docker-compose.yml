@@ -1,0 +1,11 @@
+services:
+  runner:
+    build: .
+    container_name: gha-runner-home
+    restart: unless-stopped
+    env_file: .env
+    # Optional: let workflows use Docker on the host (docker build/run in CI).
+    # WARNING: mounting the host socket gives the container root-equivalent
+    # access to the host. Only enable for trusted, private repos.
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
