@@ -29,11 +29,17 @@ can create several at once with comma-separated names:
 
 ```bash
 ./setup.sh          # Linux / macOS   (Windows: ./setup.ps1)
-# GitHub URL: https://github.com/Verjson
-# GitHub PAT: ********
-# Runner name(s): ci-runner-01, ci-runner-02
-# Labels: self-hosted,linux,x64,docker
+# GitHub URL:        https://github.com/Verjson
+# GitHub PAT:        ********
+# Runner name(s):    ci-runner-01, ci-runner-02
+# Labels:            self-hosted,linux,x64,docker
+# Runner group:      Default          <- press Enter unless you created a group (see below)
+# Work folder:       _work
 ```
+
+All of these are collected from you at the prompts, so nothing is hardcoded. The
+**runner group** defaults to `Default` (works out of the box); only change it if
+you've created a custom group in the org first — see [Runner groups](#runner-groups-org-runners-only).
 
 Each name becomes its own container `gha-<name>` with `--restart unless-stopped`
 (so it also survives reboots while the Docker daemon is enabled).
@@ -61,6 +67,30 @@ jobs:
    - Repo runner → classic PAT with `repo`.
 2. `docker compose up -d --build` then `docker compose logs -f`.
 3. `docker compose down` stops and cleanly de-registers it.
+
+## Runner groups (org runners only)
+
+A **runner group** lets an org organize runners and control **which repositories**
+may use them. It only applies to **organization** (and enterprise) runners — repo-level
+runners have no groups. The default group is `Default`, and the setup prompt defaults
+to it, so you can ignore groups entirely unless you want the access control.
+
+> ⚠️ `config.sh` can only **assign** a runner to a group that **already exists** — it
+> cannot create one. If you enter a group name that doesn't exist, registration fails.
+
+**To create a new group and use it:**
+
+1. On GitHub: **Org → Settings → Actions → Runner groups → New runner group**.
+2. Give it a **name** (e.g. `manish`), set **Repository access** (all repos, or select
+   specific ones), optionally restrict to selected workflows, then **Create**.
+3. Run the setup and enter that exact name at the **Runner group** prompt:
+   ```bash
+   ./setup.sh
+   # ...
+   # Runner group (org runners only; Default for repo): manish
+   ```
+   (Or set `RUNNER_GROUP=manish` in `.env` for the compose path.)
+4. Verify: the runner appears under that group in **Settings → Actions → Runners**.
 
 ## Files
 | File | Purpose |

@@ -27,6 +27,15 @@ fi
 
 RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
 RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
+RUNNER_GROUP="${RUNNER_GROUP:-Default}"
+RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
+
+# Runner groups only exist for org/enterprise runners, not repo-level ones.
+# Only pass --runnergroup for an org URL (path has no "/") and a non-Default group.
+group_arg=()
+if [[ "$path" != */* && -n "${RUNNER_GROUP}" && "${RUNNER_GROUP}" != "Default" ]]; then
+  group_arg=(--runnergroup "${RUNNER_GROUP}")
+fi
 
 cleanup() {
   echo "De-registering runner..."
@@ -44,7 +53,8 @@ trap cleanup SIGINT SIGTERM
   --token "${RUNNER_TOKEN}" \
   --name "${RUNNER_NAME}" \
   --labels "${RUNNER_LABELS}" \
-  --work _work \
+  --work "${RUNNER_WORKDIR}" \
+  "${group_arg[@]}" \
   --unattended --replace ${RUNNER_EPHEMERAL:+--ephemeral}
 
 # run.sh in the background + wait so the trap can fire on stop

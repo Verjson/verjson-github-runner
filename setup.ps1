@@ -23,8 +23,10 @@ $GITHUB_PAT = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($patSecure))
 if ([string]::IsNullOrWhiteSpace($GITHUB_PAT)) { throw "A PAT is required (org: admin:org / repo: repo)." }
 
-$namesInput = Read-Default "Runner name(s), comma-separated" "ci-runner-01"
-$labels     = Read-Default "Labels (comma-separated)" "self-hosted,linux,x64,docker"
+$namesInput   = Read-Default "Runner name(s), comma-separated" "ci-runner-01"
+$labels       = Read-Default "Labels (comma-separated)" "self-hosted,linux,x64,docker"
+$runnerGroup  = Read-Default "Runner group (org runners only; Default for repo)" "Default"
+$runnerWork   = Read-Default "Work folder" "_work"
 
 Write-Host "Building image ($image)..." -ForegroundColor Cyan
 docker build -t $image .
@@ -43,6 +45,8 @@ foreach ($raw in $namesInput.Split(",")) {
         -e GITHUB_PAT=$GITHUB_PAT `
         -e RUNNER_NAME=$name `
         -e RUNNER_LABELS=$labels `
+        -e RUNNER_GROUP=$runnerGroup `
+        -e RUNNER_WORKDIR=$runnerWork `
         $image | Out-Null
 }
 

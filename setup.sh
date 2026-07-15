@@ -23,6 +23,8 @@ read -rsp "GitHub PAT (input hidden): " GITHUB_PAT; echo
 
 NAMES_INPUT="$(ask 'Runner name(s), comma-separated' 'ci-runner-01')"
 LABELS="$(ask 'Labels (comma-separated)' 'self-hosted,linux,x64,docker')"
+RUNNER_GROUP="$(ask 'Runner group (org runners only; Default for repo)' 'Default')"
+RUNNER_WORKDIR="$(ask 'Work folder' '_work')"
 
 bold "Building image ($IMAGE)..."
 docker build -t "$IMAGE" .
@@ -41,6 +43,8 @@ for raw in "${NAMES[@]}"; do
     -e GITHUB_PAT="$GITHUB_PAT" \
     -e RUNNER_NAME="$name" \
     -e RUNNER_LABELS="$LABELS" \
+    -e RUNNER_GROUP="$RUNNER_GROUP" \
+    -e RUNNER_WORKDIR="$RUNNER_WORKDIR" \
     "$IMAGE" >/dev/null
 done
 
