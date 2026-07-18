@@ -25,11 +25,18 @@ get_token() {  # $1 = registration | remove
     "${api_base}/${1}-token" | jq -r .token
 }
 
-# Prefer a PAT (auto-refreshes tokens on every start/stop). Fallback: one-shot RUNNER_TOKEN.
+# Token source, most-preferred first:
+#   GITHUB_PAT       — mint + auto-refresh a registration token on every (re)start (physical hosts).
+#   RUNNER_TOKEN_CMD — a command that prints a fresh registration token on every (re)start, so a
+#                      host can inject its own minting and still get PAT-style refresh. On GCP this
+#                      is the VM's App-key mint script, so no PAT/private key ever lands on the box.
+#   RUNNER_TOKEN     — a one-shot token (expires in ~1h; no refresh).
 if [[ -n "${GITHUB_PAT:-}" ]]; then
   RUNNER_TOKEN="$(get_token registration)"
+elif [[ -n "${RUNNER_TOKEN_CMD:-}" ]]; then
+  RUNNER_TOKEN="$(eval "${RUNNER_TOKEN_CMD}")"
 fi
-: "${RUNNER_TOKEN:?Provide GITHUB_PAT (recommended) or a one-shot RUNNER_TOKEN}"
+: "${RUNNER_TOKEN:?Provide GITHUB_PAT (recommended), RUNNER_TOKEN_CMD, or a one-shot RUNNER_TOKEN}"
 
 RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
 RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
