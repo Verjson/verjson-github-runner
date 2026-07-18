@@ -21,6 +21,36 @@ Apple Silicon Macs and ARM Linux — no emulation.
 > On Windows, if scripts are blocked, run once:
 > `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` then `./setup.ps1`.
 
+## Published images (GHCR) — build once in CI, pull everywhere
+
+This repo is the **single source of truth** for the runner image. CI builds it and
+pushes to **`ghcr.io/verjson/gha-runner`** (public, so hosts pull with no credentials):
+
+| Tag | Contents |
+|-----|----------|
+| `:base`, `:latest` | base runner (Docker CLI + buildx + compose, non-root) |
+| `:rust` `:node` `:python` `:go` | base + that language toolchain |
+| `:base-<version>` (e.g. `:base-v0.1.0`) | pinned release, `FROM` a tagged release |
+| `:base-<sha>`, `:<kind>-<sha>` | immutable per-commit tag — **pin this downstream** |
+
+- **Multi-arch:** stable/release tags are `amd64` + `arm64` (built on tagged releases);
+  branch pushes publish a fast `amd64`-only `:*-<sha>` for testing.
+- The **base image ships the Docker CLI + buildx + compose plugins**, so
+  `[self-hosted, docker]` jobs can run `docker build --secret` (BuildKit) and
+  `docker compose` against a mounted host socket.
+
+**Two ways to consume the same image:**
+
+1. **Your own host** (home PC / VPS / mini PC) — the `gha` manager or `setup.sh`
+   below. These build locally today; you can also just `docker pull` a published tag.
+2. **GCP, via the CLI** — `verjson cloud runner --image ghcr.io/verjson/gha-runner:base-<sha>`
+   provisions a self-healing Spot MIG whose VMs `docker run` this image with the host
+   socket mounted, minting registration tokens at boot from a GitHub App (no PAT on the
+   box). See [`verjson-cli-cloud`](https://github.com/Verjson/verjson-cli-cloud) (#58).
+
+Host provisioning (your box, or GCP) is decoupled from the runner artifact (this image),
+so both paths stay in lockstep on one runner definition.
+
 ## The `gha` manager — TUI (recommended)
 
 `gha` is a small terminal app that provisions and monitors **many** runners at once.
@@ -37,12 +67,12 @@ and it builds the right toolchain images and launches everything.
 
 Don't even need to clone first — this fetches the repo and sets everything up:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Verjson/github-runner-docker-compose/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Verjson/verjson-github-runner/main/install.sh | bash
 ```
 It clones into `~/github-runner` (override with `GHA_DIR=…`), then runs `bootstrap.sh`.
 Set up without launching:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Verjson/github-runner-docker-compose/main/install.sh | bash -s -- --no-run
+curl -fsSL https://raw.githubusercontent.com/Verjson/verjson-github-runner/main/install.sh | bash -s -- --no-run
 ```
 
 Already cloned? Just run:
@@ -207,17 +237,28 @@ to it, so you can ignore groups entirely unless you want the access control.
 |------|---------|
 | `setup.sh` | Interactive CLI for **Linux / macOS** — prompts, builds, launches N runners as services. |
 | `setup.ps1` | Interactive CLI for **Windows** (PowerShell) — same flow. |
-| `Dockerfile` | Builds the multi-arch runner image (Ubuntu 24.04, non-root `runner`, runner v2.335.1). |
-| `entrypoint.sh` | Registers on start, runs, and de-registers on stop. |
+| `images/base.Dockerfile` | Base runner image (Ubuntu 24.04, non-root `runner`, Docker CLI + buildx + compose). Every kind builds `FROM` it. |
+| `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
+| `.github/workflows/publish-images.yml` | CI: build + push multi-arch images to `ghcr.io/verjson/gha-runner` (amd64 on branch pushes, multi-arch on `v*` tags). |
+| `entrypoint.sh` | Mints/uses a registration token (`GITHUB_PAT` / `RUNNER_TOKEN_CMD` / `RUNNER_TOKEN`), runs, de-registers on stop. |
 | `docker-compose.yml` | Single-runner alternative (`restart: unless-stopped`). |
 | `.env` | Config + secrets for the compose path (git-ignored). |
 
+> The root `Dockerfile` is a pre-`images/` leftover kept only for backward compat — the
+> live image is `images/base.Dockerfile`.
+
 ## Notes
-- **Token options:** `GITHUB_PAT` (recommended, self-refreshing) or a one-shot
-  `RUNNER_TOKEN` (expires ~1h; stop leaves an offline "ghost" entry).
-- **Docker-in-CI:** to let workflows run `docker build`/`docker run`, uncomment the
-  `docker.sock` mount in `docker-compose.yml` and add the Docker CLI to the image.
-  This grants host root-equivalent access — trusted private repos only.
+- **Token options** (`entrypoint.sh`, in order of preference):
+  - `GITHUB_PAT` — recommended for a host you control; self-refreshes each start/stop.
+  - `RUNNER_TOKEN_CMD` — a command that prints a fresh registration token each start,
+    so a host injects its own minting (GCP passes the VM's App-key mint script — no
+    PAT/private key on the box) and still gets PAT-style refresh.
+  - `RUNNER_TOKEN` — a one-shot token (expires ~1h; stop leaves an offline "ghost").
+- **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
+  plugins. To let workflows use them, mount the host socket at run time
+  (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in
+  `docker-compose.yml`). This grants host root-equivalent access — trusted private
+  repos only.
 - **Security:** a self-hosted runner executes whatever workflow code is submitted.
   Never attach it to a public repo where outside PRs could run code on your machine.
 - **Availability:** keep the host awake (disable sleep) or jobs queue while it's off.
