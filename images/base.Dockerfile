@@ -12,6 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl jq git sudo tar gzip \
     && rm -rf /var/lib/apt/lists/*
 
+# Docker CLI + buildx + compose plugins, so runners can run `docker build --secret`
+# (needs BuildKit/buildx) and `docker compose` against the mounted host socket.
+# The daemon stays the host's (dockerx MountSock -> /var/run/docker.sock) — only the
+# client and its plugins live in the image, which every kind inherits from base.
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+         > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+         docker-ce-cli docker-buildx-plugin docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
 # The runner refuses to run as root -> dedicated user
 RUN useradd -m -s /bin/bash runner \
     && echo "runner ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/runner
