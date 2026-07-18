@@ -26,7 +26,7 @@ env:
 
 jobs:
   base:
-    runs-on: [self-hosted, GCP]
+    runs-on: [self-hosted, docker]
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-qemu-action@v3
@@ -51,7 +51,7 @@ jobs:
 
   kinds:
     needs: base
-    runs-on: [self-hosted, GCP]
+    runs-on: [self-hosted, docker]
     strategy:
       fail-fast: false
       matrix:
