@@ -13,5 +13,5 @@ ENV RUSTUP_HOME=/home/runner/.rustup \
     CARGO_HOME=/home/runner/.cargo \
     PATH=/home/runner/.cargo/bin:${PATH}
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --profile minimal --component clippy rustfmt \
+      | sh -s -- -y --profile minimal -c clippy -c rustfmt \
     && rustc --version && cargo --version
