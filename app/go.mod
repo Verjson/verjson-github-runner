@@ -1,6 +1,6 @@
 module github.com/Verjson/github-runner-docker-compose/app
 
-go 1.22
+go 1.26.5
 
 require (
 	github.com/charmbracelet/bubbletea v1.1.0
