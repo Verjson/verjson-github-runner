@@ -6,10 +6,7 @@ name: publish runner images
 on:
   push:
     branches: [main]
-    paths:
-      - 'images/**'
-      - 'entrypoint.sh'
-      - '.github/workflows/publish-images.yml'
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -40,12 +37,19 @@ jobs:
         with:
           context: .
           file: images/base.Dockerfile
-          platforms: ${{ env.PLATFORMS }}
+          # arm64 (via QEMU emulation) only on tagged releases; branch pushes build
+          # amd64 only, so routine main-push publishes are fast.
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && env.PLATFORMS || 'linux/amd64' }}
           push: true
+          # Every build publishes an immutable sha tag (what cli-cloud pins). The
+          # moving/stable tags (:base, :latest, :base-<version>) are pushed only on
+          # tagged releases, so a fast amd64 branch build never overwrites a
+          # multi-arch release tag with an amd64-only image.
           tags: |
-            ${{ env.IMAGE }}:base
             ${{ env.IMAGE }}:base-${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:base', env.IMAGE) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:latest', env.IMAGE) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:base-{1}', env.IMAGE, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -69,14 +73,17 @@ jobs:
         with:
           context: .
           file: images/${{ matrix.kind }}.Dockerfile
-          platforms: ${{ env.PLATFORMS }}
+          # arm64 (via QEMU emulation) only on tagged releases; branch pushes build
+          # amd64 only, so routine main-push publishes are fast.
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && env.PLATFORMS || 'linux/amd64' }}
           push: true
           # Kinds build FROM the base we just pushed; pin the immutable sha tag so a
           # kind is always built on the exact base from the same commit.
           build-args: |
             BASE_IMAGE=${{ env.IMAGE }}:base-${{ github.sha }}
           tags: |
-            ${{ env.IMAGE }}:${{ matrix.kind }}
             ${{ env.IMAGE }}:${{ matrix.kind }}-${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:{1}', env.IMAGE, matrix.kind) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:{1}-{2}', env.IMAGE, matrix.kind, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
