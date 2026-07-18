@@ -21,7 +21,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/gha-runner
+  IMAGE: ghcr.io/verjson/gha-runner
   PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
