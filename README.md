@@ -21,7 +21,117 @@ Apple Silicon Macs and ARM Linux — no emulation.
 > On Windows, if scripts are blocked, run once:
 > `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` then `./setup.ps1`.
 
-## Quick start — interactive CLI (recommended)
+## The `gha` manager — TUI (recommended)
+
+`gha` is a small terminal app that provisions and monitors **many** runners at once.
+It reuses your **GitHub CLI** login, so there's **no PAT to paste** — it fetches
+registration tokens for you. You pick how many runners you want and **which languages**,
+and it builds the right toolchain images and launches everything.
+
+### Prerequisites
+- **Docker** (Engine or Desktop) running
+- **[GitHub CLI](https://cli.github.com)** installed and logged in: `gh auth login`
+- **Go 1.22+** (only to build the binary once)
+
+### Fastest path — one command (Linux · macOS · Windows/WSL2)
+
+Don't even need to clone first — this fetches the repo and sets everything up:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Verjson/github-runner-docker-compose/main/install.sh | bash
+```
+It clones into `~/github-runner` (override with `GHA_DIR=…`), then runs `bootstrap.sh`.
+Set up without launching:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Verjson/github-runner-docker-compose/main/install.sh | bash -s -- --no-run
+```
+
+Already cloned? Just run:
+```bash
+./bootstrap.sh
+```
+It installs anything missing (**Docker**, **GitHub CLI**), builds the `gha` binary
+(using a `golang` container if you don't have Go), then launches `gha up`. **Go is not
+required on the host.** Use `./bootstrap.sh --no-run` to set up without launching.
+
+- **Linux** — apt/dnf/yum/pacman/apk supported; Docker via the official convenience script.
+- **macOS** — installs Docker Desktop + `gh` via Homebrew (start Docker Desktop once, re-run).
+- **Windows** — run it inside **WSL2** (Ubuntu). Docker Desktop's WSL2 backend runs the
+  Linux runner containers; the script is just the Linux path there.
+
+> On a fresh Linux box you may need to log out/in once so your user joins the `docker`
+> group — the script activates it for the current session automatically where possible.
+
+### Or build & run manually
+```bash
+./build.sh          # compiles ./gha  (or: cd app && go build -o ../gha .)
+./gha up            # ⭐ one command: gh login (if needed) → network check → add runners
+./gha               # or an interactive menu: add / dashboard / list / net check
+```
+
+### `gha up` — the one-command path
+`gha up` walks the whole thing end to end:
+1. checks Docker is running,
+2. runs **`gh auth login`** for you if you're not already signed in,
+3. runs a **network preflight** — confirms outbound **443** to GitHub is open
+   (and reminds you inbound/static-IP aren't needed), then
+4. drops into the add-runners wizard (target → kinds → counts → options).
+
+### What each command does
+1. **`gha doctor`** — verifies Docker + `gh` are ready.
+2. **`gha netcheck`** — tests outbound 443 to GitHub (honors `HTTPS_PROXY`). Alias: `net`.
+3. **`gha add`** — a guided wizard:
+   - pick a **repo you administer** or an **org** (from a list, or type `owner/repo`),
+   - choose **which kinds** of runners (multi-select), and
+   - **how many of each** (e.g. 2 × Rust, 3 × Node) — all on one screen,
+   - set labels/group/ephemeral, confirm, and it builds + launches the containers.
+   - If your `gh` session lacks the scope (e.g. `admin:org`), it offers to run
+     `gh auth refresh` for you.
+4. **`gha dashboard`** — a **btop-style live monitor** (aliases: `dash`, `top`): per-runner
+   state, CPU/mem, and current job, with keys to **restart / stop / view logs**.
+
+```
+  ↑/↓ move · l logs · r restart · s stop · q quit
+```
+
+### Runner "kinds" (preloaded toolchains)
+
+Each kind is a thin image built on the base runner, with default labels so workflows can
+target it via `runs-on`:
+
+| Kind | Preinstalled | `runs-on` labels |
+|------|--------------|------------------|
+| **Rust** | rustup, cargo, clippy, rustfmt + native build deps | `[self-hosted, rust]` |
+| **Node** | Node.js LTS + npm, pnpm, yarn | `[self-hosted, node]` |
+| **Python** | Python 3 + pip/venv + uv | `[self-hosted, python]` |
+| **Go** | official Go toolchain | `[self-hosted, go]` |
+| **Base** | just the runner | `[self-hosted]` |
+
+The images live in `images/<kind>.Dockerfile` (all build `FROM gha-runner:base`) — add your
+own kind by dropping in a new Dockerfile and a matching entry in `app/internal/kinds/kinds.go`.
+
+> **Auth note:** `gha` passes your `gh` OAuth token into each container as `GITHUB_PAT`, so
+> registration tokens **auto-refresh on restart** (a one-shot token would expire after ~1h).
+> Treat it like any credential; only attach runners to repos/orgs you trust.
+
+### Networking — no static IP, no open ports
+
+A self-hosted runner makes an **outbound** long-poll to GitHub and receives jobs over it —
+GitHub never connects *in*. So:
+
+- **No static IP** — a dynamic/home IP is fine; it just reconnects if it changes.
+- **No port forwarding / inbound ports** — works behind NAT, CGNAT, and typical firewalls.
+- The **only** requirement is **outbound HTTPS (443)** to GitHub. Verify it any time with
+  `gha netcheck` (or `gha up` runs it automatically).
+
+**Behind a proxy / locked-down egress?** The wizard has optional **HTTPS proxy** and
+**no-proxy** fields (prefilled from `HTTPS_PROXY` / `NO_PROXY` if set). Whatever you enter is
+passed into every runner container, and `entrypoint.sh` + the runner honor it. If egress is
+filtered, allowlist: `github.com`, `api.github.com`, `*.actions.githubusercontent.com`,
+`codeload.github.com`, `objects.githubusercontent.com`, and `*.blob.core.windows.net`.
+
+---
+
+## Quick start — shell scripts (alternative, no Go/gh needed)
 
 Run the setup script for your OS; it prompts for the URL, PAT, and runner name(s),
 then builds the image and launches each runner as an auto-restarting service. You
