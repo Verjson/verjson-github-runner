@@ -239,8 +239,8 @@ to it, so you can ignore groups entirely unless you want the access control.
 | `setup.ps1` | Interactive CLI for **Windows** (PowerShell) — same flow. |
 | `images/base.Dockerfile` | Base runner image (Ubuntu 24.04, non-root `runner`, Docker CLI + buildx + compose). Every kind builds `FROM` it. |
 | `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
-| `.github/workflows/publish-images.yml` | CI: build + push multi-arch images to `ghcr.io/verjson/gha-runner` (amd64 on branch pushes, multi-arch on `v*` tags). |
-| `entrypoint.sh` | Mints/uses a registration token (`GITHUB_PAT` / `RUNNER_TOKEN_CMD` / `RUNNER_TOKEN`), runs, de-registers on stop. |
+| `.github/workflows/publish-images.yml` | CI: build + push multi-arch images to `ghcr.io/verjson/gha-runner` (amd64 + arm64 multi-arch on main push and tags). |
+| `entrypoint.sh` | Mints/uses a registration token (`GITHUB_PAT` / `RUNNER_TOKEN_CMD` / `RUNNER_TOKEN`), runs, de-registers on stop (`RUNNER_REMOVE_TOKEN_CMD`). |
 | `docker-compose.yml` | Single-runner alternative (`restart: unless-stopped`). |
 | `.env` | Config + secrets for the compose path (git-ignored). |
 
@@ -253,6 +253,8 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_TOKEN_CMD` — a command that prints a fresh registration token each start,
     so a host injects its own minting (GCP passes the VM's App-key mint script — no
     PAT/private key on the box) and still gets PAT-style refresh.
+  - `RUNNER_REMOVE_TOKEN_CMD` — optional command that prints a fresh removal token
+    on container cleanup/stop.
   - `RUNNER_TOKEN` — a one-shot token (expires ~1h; stop leaves an offline "ghost").
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
   plugins. To let workflows use them, mount the host socket at run time

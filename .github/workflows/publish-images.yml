@@ -37,18 +37,14 @@ jobs:
         with:
           context: .
           file: images/base.Dockerfile
-          # arm64 (via QEMU emulation) only on tagged releases; branch pushes build
-          # amd64 only, so routine main-push publishes are fast.
-          platforms: ${{ startsWith(github.ref, 'refs/tags/') && env.PLATFORMS || 'linux/amd64' }}
+          platforms: ${{ env.PLATFORMS }}
           push: true
-          # Every build publishes an immutable sha tag (what cli-cloud pins). The
-          # moving/stable tags (:base, :latest, :base-<version>) are pushed only on
-          # tagged releases, so a fast amd64 branch build never overwrites a
-          # multi-arch release tag with an amd64-only image.
+          # Every build publishes immutable sha tags and stable tags (:base, :latest, :<kind>)
+          # on push to main and tagged releases. Tagged releases also publish release version tags.
           tags: |
             ${{ env.IMAGE }}:base-${{ github.sha }}
-            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:base', env.IMAGE) || '' }}
-            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:latest', env.IMAGE) || '' }}
+            ${{ env.IMAGE }}:base
+            ${{ env.IMAGE }}:latest
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:base-{1}', env.IMAGE, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -73,9 +69,7 @@ jobs:
         with:
           context: .
           file: images/${{ matrix.kind }}.Dockerfile
-          # arm64 (via QEMU emulation) only on tagged releases; branch pushes build
-          # amd64 only, so routine main-push publishes are fast.
-          platforms: ${{ startsWith(github.ref, 'refs/tags/') && env.PLATFORMS || 'linux/amd64' }}
+          platforms: ${{ env.PLATFORMS }}
           push: true
           # Kinds build FROM the base we just pushed; pin the immutable sha tag so a
           # kind is always built on the exact base from the same commit.
@@ -83,7 +77,7 @@ jobs:
             BASE_IMAGE=${{ env.IMAGE }}:base-${{ github.sha }}
           tags: |
             ${{ env.IMAGE }}:${{ matrix.kind }}-${{ github.sha }}
-            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:{1}', env.IMAGE, matrix.kind) || '' }}
+            ${{ env.IMAGE }}:${{ matrix.kind }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:{1}-{2}', env.IMAGE, matrix.kind, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -30,6 +30,7 @@ get_token() {  # $1 = registration | remove
 #   RUNNER_TOKEN_CMD — a command that prints a fresh registration token on every (re)start, so a
 #                      host can inject its own minting and still get PAT-style refresh. On GCP this
 #                      is the VM's App-key mint script, so no PAT/private key ever lands on the box.
+#   RUNNER_REMOVE_TOKEN_CMD — optional command that prints a fresh removal token on cleanup/stop.
 #   RUNNER_TOKEN     — a one-shot token (expires in ~1h; no refresh).
 if [[ -n "${GITHUB_PAT:-}" ]]; then
   RUNNER_TOKEN="$(get_token registration)"
@@ -54,6 +55,9 @@ cleanup() {
   echo "De-registering runner..."
   if [[ -n "${GITHUB_PAT:-}" ]]; then
     ./config.sh remove --token "$(get_token remove)" || ./config.sh remove --local || true
+  elif [[ -n "${RUNNER_REMOVE_TOKEN_CMD:-}" ]]; then
+    remove_tok="$(eval "${RUNNER_REMOVE_TOKEN_CMD}")"
+    ./config.sh remove --token "${remove_tok}" || ./config.sh remove --local || true
   else
     ./config.sh remove --local || true
   fi
