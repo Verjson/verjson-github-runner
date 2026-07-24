@@ -1,11 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Environment variables:
+#   GITHUB_URL       — required, target org or repo URL (e.g. https://github.com/your-org or https://github.com/you/repo)
+#   RUNNER_DIR       — optional, working directory containing actions-runner binaries (defaults to /home/runner/actions-runner)
+#   GITHUB_PAT       — optional, PAT for token minting and auto-refresh
+#   RUNNER_TOKEN_CMD — optional, command that outputs a fresh registration token on (re)start
+#   RUNNER_REMOVE_TOKEN_CMD — optional, command that outputs a fresh removal token on cleanup
+#   RUNNER_TOKEN     — optional, static one-shot registration token (~1h expiration)
+#   RUNNER_NAME      — optional, runner hostname identifier (defaults to system hostname)
+#   RUNNER_LABELS    — optional, comma-separated runner labels (defaults to self-hosted,linux,x64,docker)
+#   RUNNER_GROUP     — optional, org runner group name (defaults to Default)
+#   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
+#   RUNNER_EPHEMERAL — optional, if set to 1/true, passes --ephemeral to config.sh (single-job teardown)
+
 get_token() {  # $1 = registration | remove
   curl -fsSL -X POST \
     -H "Authorization: Bearer ${GITHUB_PAT}" \
     -H "Accept: application/vnd.github+json" \
     "${api_base}/${1}-token" | jq -r .token
+}
+
+# Resolve org-vs-repo from the URL for API calls and runner group parameters
+parse_github_url() {
+  path="${GITHUB_URL#https://github.com/}"
+  if [[ "$path" == */* ]]; then
+    api_base="https://api.github.com/repos/${path}/actions/runners"
+  else
+    api_base="https://api.github.com/orgs/${path}/actions/runners"
+  fi
+
+  # Runner groups only exist for org/enterprise runners, not repo-level ones.
+  # Only pass --runnergroup for an org URL (path has no "/") and a non-Default group.
+  group_arg=()
+  if [[ "$path" != */* && -n "${RUNNER_GROUP:-}" && "${RUNNER_GROUP}" != "Default" ]]; then
+    group_arg=(--runnergroup "${RUNNER_GROUP}")
+  fi
 }
 
 # Token source, most-preferred first:
@@ -46,27 +76,13 @@ main() {
     echo "Using proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}${NO_PROXY:+ (no_proxy: ${NO_PROXY})}"
   fi
 
-  # Resolve org-vs-repo from the URL for the API calls
-  path="${GITHUB_URL#https://github.com/}"
-  if [[ "$path" == */* ]]; then
-    api_base="https://api.github.com/repos/${path}/actions/runners"
-  else
-    api_base="https://api.github.com/orgs/${path}/actions/runners"
-  fi
-
+  parse_github_url
   resolve_token
 
   RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
   RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
   RUNNER_GROUP="${RUNNER_GROUP:-Default}"
   RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
-
-  # Runner groups only exist for org/enterprise runners, not repo-level ones.
-  # Only pass --runnergroup for an org URL (path has no "/") and a non-Default group.
-  group_arg=()
-  if [[ "$path" != */* && -n "${RUNNER_GROUP}" && "${RUNNER_GROUP}" != "Default" ]]; then
-    group_arg=(--runnergroup "${RUNNER_GROUP}")
-  fi
 
   trap cleanup SIGINT SIGTERM
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Unit test suite for entrypoint.sh token resolution and cleanup logic
+# Unit test suite for entrypoint.sh token resolution, URL parsing, and cleanup logic
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -196,6 +196,79 @@ EOF
 
   (cleanup)
   assert_contains "remove --local" "$(< config_calls.log)" "Executes local removal by default"
+)
+
+# -----------------------------------------------------------------------------
+# Test 10: parse_github_url with repo URL
+# -----------------------------------------------------------------------------
+echo "Test 10: parse_github_url with repo URL"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  GITHUB_URL="https://github.com/my-org/my-repo"
+  RUNNER_GROUP="custom_group"
+  parse_github_url
+  assert_eq "https://api.github.com/repos/my-org/my-repo/actions/runners" "${api_base}" "Parses repo API base"
+  assert_eq "0" "${#group_arg[@]}" "Omits --runnergroup for repo URL even if RUNNER_GROUP is set"
+)
+
+# -----------------------------------------------------------------------------
+# Test 11: parse_github_url with org URL and default runner group
+# -----------------------------------------------------------------------------
+echo "Test 11: parse_github_url with org URL and default runner group"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  GITHUB_URL="https://github.com/my-org"
+  RUNNER_GROUP="Default"
+  parse_github_url
+  assert_eq "https://api.github.com/orgs/my-org/actions/runners" "${api_base}" "Parses org API base"
+  assert_eq "0" "${#group_arg[@]}" "Omits --runnergroup when group is Default"
+)
+
+# -----------------------------------------------------------------------------
+# Test 12: parse_github_url with org URL and custom runner group
+# -----------------------------------------------------------------------------
+echo "Test 12: parse_github_url with org URL and custom runner group"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  GITHUB_URL="https://github.com/my-org"
+  RUNNER_GROUP="custom_group"
+  parse_github_url
+  assert_eq "https://api.github.com/orgs/my-org/actions/runners" "${api_base}" "Parses org API base"
+  assert_eq "--runnergroup custom_group" "${group_arg[*]}" "Includes --runnergroup for custom org group"
+)
+
+# -----------------------------------------------------------------------------
+# Test 13: main execution with RUNNER_DIR override and RUNNER_EPHEMERAL=1
+# -----------------------------------------------------------------------------
+echo "Test 13: main execution with RUNNER_DIR override and RUNNER_EPHEMERAL=1"
+(
+  TEST_RUNNER_DIR="${TMP_DIR}/test_runner_workdir"
+  mkdir -p "${TEST_RUNNER_DIR}"
+
+  cat << 'EOF' > "${TEST_RUNNER_DIR}/config.sh"
+#!/usr/bin/env bash
+echo "config.sh called with args: $@" >> config_args.log
+EOF
+  cat << 'EOF' > "${TEST_RUNNER_DIR}/run.sh"
+#!/usr/bin/env bash
+echo "run.sh executed" >> run_exec.log
+EOF
+  chmod +x "${TEST_RUNNER_DIR}/config.sh" "${TEST_RUNNER_DIR}/run.sh"
+
+  export GITHUB_URL="https://github.com/my-org/my-repo"
+  export RUNNER_TOKEN="mock_token"
+  export RUNNER_DIR="${TEST_RUNNER_DIR}"
+  export RUNNER_EPHEMERAL=1
+
+  source "${REPO_ROOT}/entrypoint.sh"
+  main &
+  main_pid=$!
+  sleep 1
+  kill -TERM $main_pid 2>/dev/null || true
+  wait $main_pid 2>/dev/null || true
+
+  assert_contains "--ephemeral" "$(< "${TEST_RUNNER_DIR}/config_args.log")" "Passes --ephemeral flag when RUNNER_EPHEMERAL is set"
+  assert_contains "run.sh executed" "$(< "${TEST_RUNNER_DIR}/run_exec.log")" "Launches run.sh in working directory"
 )
 
 echo "-----------------------------------------------------------------------------"

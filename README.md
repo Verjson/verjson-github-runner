@@ -256,13 +256,15 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_REMOVE_TOKEN_CMD` — optional command that prints a fresh removal token
     on container cleanup/stop.
   - `RUNNER_TOKEN` — a one-shot token (expires ~1h; stop leaves an offline "ghost").
+- **Environment overrides** (`entrypoint.sh`):
+  - `RUNNER_DIR` — optional working directory override containing `actions-runner` binaries (defaults to `/home/runner/actions-runner`).
+  - `RUNNER_EPHEMERAL` — if set to `1` or `true`, passes `--ephemeral` to `./config.sh` so the runner tears down after completing a single job.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
   plugins. To let workflows use them, mount the host socket at run time
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in
   `docker-compose.yml`). This grants host root-equivalent access — trusted private
   repos only.
-- **Security:** a self-hosted runner executes whatever workflow code is submitted.
-  Never attach it to a public repo where outside PRs could run code on your machine.
+- **Security & Hardening:** See [SECURITY.md](file:///d:/Development/verjson/verjson-github-runner/SECURITY.md) for full threat model details, ephemeral runner enforcement (`RUNNER_EPHEMERAL=1`), least-privilege token permissions, IMDS isolation, and incident response procedures.
 - **Availability:** keep the host awake (disable sleep) or jobs queue while it's off.
 - **Update the runner:** bump `RUNNER_VERSION` in the `Dockerfile`, then
   `docker compose up -d --build`.
