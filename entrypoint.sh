@@ -1,23 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${GITHUB_URL:?Set GITHUB_URL, e.g. https://github.com/your-org or https://github.com/you/repo}"
-cd /home/runner/actions-runner
-
-# Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
-# environment automatically. We just surface it in the logs when one is configured.
-if [[ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}" ]]; then
-  echo "Using proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}${NO_PROXY:+ (no_proxy: ${NO_PROXY})}"
-fi
-
-# Resolve org-vs-repo from the URL for the API calls
-path="${GITHUB_URL#https://github.com/}"
-if [[ "$path" == */* ]]; then
-  api_base="https://api.github.com/repos/${path}/actions/runners"
-else
-  api_base="https://api.github.com/orgs/${path}/actions/runners"
-fi
-
 get_token() {  # $1 = registration | remove
   curl -fsSL -X POST \
     -H "Authorization: Bearer ${GITHUB_PAT}" \
@@ -32,24 +15,14 @@ get_token() {  # $1 = registration | remove
 #                      is the VM's App-key mint script, so no PAT/private key ever lands on the box.
 #   RUNNER_REMOVE_TOKEN_CMD — optional command that prints a fresh removal token on cleanup/stop.
 #   RUNNER_TOKEN     — a one-shot token (expires in ~1h; no refresh).
-if [[ -n "${GITHUB_PAT:-}" ]]; then
-  RUNNER_TOKEN="$(get_token registration)"
-elif [[ -n "${RUNNER_TOKEN_CMD:-}" ]]; then
-  RUNNER_TOKEN="$(eval "${RUNNER_TOKEN_CMD}")"
-fi
-: "${RUNNER_TOKEN:?Provide GITHUB_PAT (recommended), RUNNER_TOKEN_CMD, or a one-shot RUNNER_TOKEN}"
-
-RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
-RUNNER_GROUP="${RUNNER_GROUP:-Default}"
-RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
-
-# Runner groups only exist for org/enterprise runners, not repo-level ones.
-# Only pass --runnergroup for an org URL (path has no "/") and a non-Default group.
-group_arg=()
-if [[ "$path" != */* && -n "${RUNNER_GROUP}" && "${RUNNER_GROUP}" != "Default" ]]; then
-  group_arg=(--runnergroup "${RUNNER_GROUP}")
-fi
+resolve_token() {
+  if [[ -n "${GITHUB_PAT:-}" ]]; then
+    RUNNER_TOKEN="$(get_token registration)"
+  elif [[ -n "${RUNNER_TOKEN_CMD:-}" ]]; then
+    RUNNER_TOKEN="$(eval "${RUNNER_TOKEN_CMD}")"
+  fi
+  : "${RUNNER_TOKEN:?Provide GITHUB_PAT (recommended), RUNNER_TOKEN_CMD, or a one-shot RUNNER_TOKEN}"
+}
 
 cleanup() {
   echo "De-registering runner..."
@@ -62,16 +35,54 @@ cleanup() {
   fi
   exit 0
 }
-trap cleanup SIGINT SIGTERM
 
-./config.sh \
-  --url "${GITHUB_URL}" \
-  --token "${RUNNER_TOKEN}" \
-  --name "${RUNNER_NAME}" \
-  --labels "${RUNNER_LABELS}" \
-  --work "${RUNNER_WORKDIR}" \
-  "${group_arg[@]}" \
-  --unattended --replace ${RUNNER_EPHEMERAL:+--ephemeral}
+main() {
+  : "${GITHUB_URL:?Set GITHUB_URL, e.g. https://github.com/your-org or https://github.com/you/repo}"
+  cd "${RUNNER_DIR:-/home/runner/actions-runner}"
 
-# run.sh in the background + wait so the trap can fire on stop
-./run.sh & wait $!
+  # Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
+  # environment automatically. We just surface it in the logs when one is configured.
+  if [[ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}" ]]; then
+    echo "Using proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}${NO_PROXY:+ (no_proxy: ${NO_PROXY})}"
+  fi
+
+  # Resolve org-vs-repo from the URL for the API calls
+  path="${GITHUB_URL#https://github.com/}"
+  if [[ "$path" == */* ]]; then
+    api_base="https://api.github.com/repos/${path}/actions/runners"
+  else
+    api_base="https://api.github.com/orgs/${path}/actions/runners"
+  fi
+
+  resolve_token
+
+  RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
+  RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
+  RUNNER_GROUP="${RUNNER_GROUP:-Default}"
+  RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
+
+  # Runner groups only exist for org/enterprise runners, not repo-level ones.
+  # Only pass --runnergroup for an org URL (path has no "/") and a non-Default group.
+  group_arg=()
+  if [[ "$path" != */* && -n "${RUNNER_GROUP}" && "${RUNNER_GROUP}" != "Default" ]]; then
+    group_arg=(--runnergroup "${RUNNER_GROUP}")
+  fi
+
+  trap cleanup SIGINT SIGTERM
+
+  ./config.sh \
+    --url "${GITHUB_URL}" \
+    --token "${RUNNER_TOKEN}" \
+    --name "${RUNNER_NAME}" \
+    --labels "${RUNNER_LABELS}" \
+    --work "${RUNNER_WORKDIR}" \
+    "${group_arg[@]}" \
+    --unattended --replace ${RUNNER_EPHEMERAL:+--ephemeral}
+
+  # run.sh in the background + wait so the trap can fire on stop
+  ./run.sh & wait $!
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
