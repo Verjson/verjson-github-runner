@@ -56,8 +56,7 @@ cleanup() {
   if [[ -n "${GITHUB_PAT:-}" ]]; then
     ./config.sh remove --token "$(get_token remove)" || ./config.sh remove --local || true
   elif [[ -n "${RUNNER_REMOVE_TOKEN_CMD:-}" ]]; then
-    remove_tok="$(eval "${RUNNER_REMOVE_TOKEN_CMD}")"
-    ./config.sh remove --token "${remove_tok}" || ./config.sh remove --local || true
+    ./config.sh remove --token "$(eval "${RUNNER_REMOVE_TOKEN_CMD}")" || ./config.sh remove --local || true
   else
     ./config.sh remove --local || true
   fi
