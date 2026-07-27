@@ -14,6 +14,68 @@ set -euo pipefail
 #   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
 #   RUNNER_EPHEMERAL — optional, if set to 1/true, passes --ephemeral to config.sh (single-job teardown)
 
+runner_labels_include_ci() {
+  local label
+  local labels=()
+
+  IFS=',' read -r -a labels <<< "${1}"
+  for label in "${labels[@]}"; do
+    label="${label#"${label%%[![:space:]]*}"}"
+    label="${label%"${label##*[![:space:]]}"}"
+    if [[ "${label}" == "ci" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_admission_check() {
+  local name="$1"
+  shift
+
+  if ! "$@"; then
+    echo "CI runner admission failed: ${name} is unavailable or unhealthy." >&2
+    return 1
+  fi
+}
+
+run_node_24_admission_check() {
+  local version
+
+  if ! version="$(node --version)"; then
+    echo "CI runner admission failed: Node.js 24 is unavailable or unhealthy." >&2
+    return 1
+  fi
+  echo "${version}"
+  if [[ ! "${version}" =~ ^v24\. ]]; then
+    echo "CI runner admission failed: Node.js major 24 is required; found ${version}." >&2
+    return 1
+  fi
+}
+
+attest_ci_runner() {
+  echo "Attesting required ci runner capabilities..."
+  run_admission_check "GitHub CLI" gh --version || return 1
+  run_admission_check "Docker daemon" docker version || return 1
+  run_admission_check "Docker Compose" docker compose version || return 1
+  run_admission_check "Docker Buildx" docker buildx version || return 1
+  run_node_24_admission_check || return 1
+  run_admission_check "npm" npm --version || return 1
+  run_admission_check "jq" jq --version || return 1
+  run_admission_check "git" git --version || return 1
+  run_admission_check "bash" bash --version || return 1
+  run_admission_check "curl" curl --version || return 1
+  run_admission_check "grep" grep --version || return 1
+  run_admission_check "sed" sed --version || return 1
+  run_admission_check "awk" awk --version || return 1
+  run_admission_check "find" find --version || return 1
+  run_admission_check "base64" base64 --version || return 1
+  run_admission_check "tar" tar --version || return 1
+  run_admission_check "gzip" gzip --version || return 1
+  echo "CI runner admission passed."
+}
+
 get_token() {  # $1 = registration | remove
   curl -fsSL -X POST \
     -H "Authorization: Bearer ${GITHUB_PAT}" \
@@ -70,6 +132,17 @@ main() {
   : "${GITHUB_URL:?Set GITHUB_URL, e.g. https://github.com/your-org or https://github.com/you/repo}"
   cd "${RUNNER_DIR:-/home/runner/actions-runner}"
 
+  RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
+  RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
+  RUNNER_GROUP="${RUNNER_GROUP:-Default}"
+  RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
+
+  # Advertising "ci" is a capability claim. Prove the complete contract before any
+  # registration credential is minted or config.sh can make the runner schedulable.
+  if runner_labels_include_ci "${RUNNER_LABELS}"; then
+    attest_ci_runner || return 1
+  fi
+
   # Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
   # environment automatically. We just surface it in the logs when one is configured.
   if [[ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}" ]]; then
@@ -78,11 +151,6 @@ main() {
 
   parse_github_url
   resolve_token
-
-  RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
-  RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
-  RUNNER_GROUP="${RUNNER_GROUP:-Default}"
-  RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
 
   trap cleanup SIGINT SIGTERM
 

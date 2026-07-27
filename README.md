@@ -23,21 +23,23 @@ Apple Silicon Macs and ARM Linux — no emulation.
 
 ## Published images (GHCR) — build once in CI, pull everywhere
 
-This repo is the **single source of truth** for the runner image. CI builds it and
-pushes to **`ghcr.io/verjson/gha-runner`** (public, so hosts pull with no credentials):
+This repo is the **single source of truth** for the runner image used by Verjson and
+Tequity. CI builds one shared artifact and pushes it to
+**`ghcr.io/verjson/gha-runner`** (public, so hosts pull with no credentials):
 
 | Tag | Contents |
 |-----|----------|
-| `:base`, `:latest` | base runner (Docker CLI + buildx + compose, non-root) |
+| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, non-root) |
 | `:rust` `:node` `:python` `:go` | base + that language toolchain |
 | `:base-<version>` (e.g. `:base-v0.1.0`) | pinned release, `FROM` a tagged release |
 | `:base-<sha>`, `:<kind>-<sha>` | immutable per-commit tag — **pin this downstream** |
 
-- **Multi-arch:** stable/release tags are `amd64` + `arm64` (built on tagged releases);
-  branch pushes publish a fast `amd64`-only `:*-<sha>` for testing.
-- The **base image ships the Docker CLI + buildx + compose plugins**, so
+- **Multi-arch:** published tags are `amd64` + `arm64`.
+- The **base image ships `gh`, Node.js 24/npm, and Docker CLI + buildx + compose plugins**, so
   `[self-hosted, docker]` jobs can run `docker build --secret` (BuildKit) and
   `docker compose` against a mounted host socket.
+- Every published image includes BuildKit SBOM and provenance attestations. Each publish
+  run also retains a receipt mapping every immutable `:*-<sha>` tag to its manifest digest.
 
 **Two ways to consume the same image:**
 
@@ -50,6 +52,25 @@ pushes to **`ghcr.io/verjson/gha-runner`** (public, so hosts pull with no creden
 
 Host provisioning (your box, or GCP) is decoupled from the runner artifact (this image),
 so both paths stay in lockstep on one runner definition.
+
+### The `ci` runner contract
+
+The exact `ci` label declares a portable capability contract shared by Verjson and
+Tequity. Before minting a registration token or running `config.sh`, the container
+exercises `gh`, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git, bash,
+curl, grep, sed, awk, find, base64, tar, and gzip. If any check fails, startup stops and
+the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt
+into this contract. PowerShell is not part of the portable Linux contract.
+
+Deploy immutable digests rather than mutable tags:
+
+```sh
+docker pull ghcr.io/verjson/gha-runner@sha256:<manifest-digest>
+```
+
+Attaching `ci` to an organization runner remains a rollout action. Use the digest receipt
+from the publish workflow, verify admission on the target host, and preserve the existing
+runner-group repository allowlist.
 
 ## The `gha` manager — TUI (recommended)
 
@@ -134,7 +155,7 @@ target it via `runs-on`:
 | **Node** | Node.js LTS + npm, pnpm, yarn | `[self-hosted, node]` |
 | **Python** | Python 3 + pip/venv + uv | `[self-hosted, python]` |
 | **Go** | official Go toolchain | `[self-hosted, go]` |
-| **Base** | just the runner | `[self-hosted]` |
+| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, portable shell tools | `[self-hosted]` |
 
 The images live in `images/<kind>.Dockerfile` (all build `FROM gha-runner:base`) — add your
 own kind by dropping in a new Dockerfile and a matching entry in `app/internal/kinds/kinds.go`.
@@ -237,10 +258,10 @@ to it, so you can ignore groups entirely unless you want the access control.
 |------|---------|
 | `setup.sh` | Interactive CLI for **Linux / macOS** — prompts, builds, launches N runners as services. |
 | `setup.ps1` | Interactive CLI for **Windows** (PowerShell) — same flow. |
-| `images/base.Dockerfile` | Base runner image (Ubuntu 24.04, non-root `runner`, Docker CLI + buildx + compose). Every kind builds `FROM` it. |
+| `images/base.Dockerfile` | Base runner image (Ubuntu 24.04, non-root `runner`, shared `ci` tools). Every kind builds `FROM` it. |
 | `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
-| `.github/workflows/publish-images.yml` | CI: build + push multi-arch images to `ghcr.io/verjson/gha-runner` (amd64 + arm64 multi-arch on main push and tags). |
-| `entrypoint.sh` | Mints/uses a registration token (`GITHUB_PAT` / `RUNNER_TOKEN_CMD` / `RUNNER_TOKEN`), runs, de-registers on stop (`RUNNER_REMOVE_TOKEN_CMD`). |
+| `.github/workflows/publish-images.yml` | CI: build + push attested multi-arch images and retain immutable digest receipts. |
+| `entrypoint.sh` | Admits the exact `ci` contract before credentials, mints/uses a registration token, runs, and de-registers on stop. |
 | `docker-compose.yml` | Single-runner alternative (`restart: unless-stopped`). |
 | `.env` | Config + secrets for the compose path (git-ignored). |
 
@@ -259,6 +280,8 @@ to it, so you can ignore groups entirely unless you want the access control.
 - **Environment overrides** (`entrypoint.sh`):
   - `RUNNER_DIR` — optional working directory override containing `actions-runner` binaries (defaults to `/home/runner/actions-runner`).
   - `RUNNER_EPHEMERAL` — if set to `1` or `true`, passes `--ephemeral` to `./config.sh` so the runner tears down after completing a single job.
+  - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
+    bypass startup admission.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
   plugins. To let workflows use them, mount the host socket at run time
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in
