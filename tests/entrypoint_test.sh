@@ -40,6 +40,30 @@ assert_contains() {
   fi
 }
 
+assert_file_exists() {
+  local path="$1"
+  local msg="$2"
+  if [[ -e "${path}" ]]; then
+    echo "  ✓ ${msg}"
+    touch "${TMP_DIR}/passed_$(date +%s%N)_$RANDOM"
+  else
+    echo "  ✗ ${msg} (expected '${path}' to exist)"
+    touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"
+  fi
+}
+
+assert_file_absent() {
+  local path="$1"
+  local msg="$2"
+  if [[ ! -e "${path}" ]]; then
+    echo "  ✓ ${msg}"
+    touch "${TMP_DIR}/passed_$(date +%s%N)_$RANDOM"
+  else
+    echo "  ✗ ${msg} (expected '${path}' to be absent)"
+    touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"
+  fi
+}
+
 # Mock api_base for tests
 api_base="https://api.github.com/repos/Verjson/test/actions/runners"
 
@@ -269,6 +293,188 @@ EOF
 
   assert_contains "--ephemeral" "$(< "${TEST_RUNNER_DIR}/config_args.log")" "Passes --ephemeral flag when RUNNER_EPHEMERAL is set"
   assert_contains "run.sh executed" "$(< "${TEST_RUNNER_DIR}/run_exec.log")" "Launches run.sh in working directory"
+)
+
+# -----------------------------------------------------------------------------
+# Test 14: exact ci label matching
+# -----------------------------------------------------------------------------
+echo "Test 14: exact ci label matching"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+
+  runner_labels_include_ci "self-hosted, ci ,docker"
+  assert_eq "0" "$?" "Matches ci as a trimmed comma-separated label"
+
+  runner_labels_include_ci "self-hosted,CI,docker"
+  assert_eq "0" "$?" "Matches uppercase CI because GitHub labels are case-insensitive"
+
+  runner_labels_include_ci "self-hosted,Ci,docker"
+  assert_eq "0" "$?" "Matches mixed-case Ci because GitHub labels are case-insensitive"
+
+  set +e
+  runner_labels_include_ci "self-hosted,circleci,ci-extra"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Does not match labels that merely contain ci"
+)
+
+# -----------------------------------------------------------------------------
+# Test 15: passing ci admission exercises the complete tool contract
+# -----------------------------------------------------------------------------
+echo "Test 15: passing ci admission exercises the complete tool contract"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_pass.log"
+
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() { echo "docker $*" >> "${command_log}"; }
+  node() {
+    echo "node $*" >> "${command_log}"
+    echo "v24.18.0"
+  }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() { echo "jq $*" >> "${command_log}"; }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() { echo "bash $*" >> "${command_log}"; }
+  curl() { echo "curl $*" >> "${command_log}"; }
+  grep() { echo "grep $*" >> "${command_log}"; }
+  sed() { echo "sed $*" >> "${command_log}"; }
+  awk() { echo "awk $*" >> "${command_log}"; }
+  find() { echo "find $*" >> "${command_log}"; }
+  base64() { echo "base64 $*" >> "${command_log}"; }
+  tar() { echo "tar $*" >> "${command_log}"; }
+  gzip() { echo "gzip $*" >> "${command_log}"; }
+
+  attest_ci_runner >/dev/null
+
+  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version'
+  assert_eq "${expected_commands}" "$(< "${command_log}")" "Exercises every required ci capability"
+)
+
+# -----------------------------------------------------------------------------
+# Test 16: failing ci admission stops at the failed capability
+# -----------------------------------------------------------------------------
+echo "Test 16: failing ci admission stops at the failed capability"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_fail.log"
+
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() {
+    echo "docker $*" >> "${command_log}"
+    [[ "$*" != "version" ]]
+  }
+  node() { echo "node $*" >> "${command_log}"; }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() { echo "jq $*" >> "${command_log}"; }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() { echo "bash $*" >> "${command_log}"; }
+
+  set +e
+  output="$(attest_ci_runner 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects ci admission when a required capability fails"
+  assert_contains "Docker daemon is unavailable or unhealthy" "${output}" "Identifies the failed capability"
+  assert_eq $'gh --version\ndocker version' "$(< "${command_log}")" "Stops admission immediately after failure"
+)
+
+# -----------------------------------------------------------------------------
+# Test 17: ci admission rejects the wrong Node.js major
+# -----------------------------------------------------------------------------
+echo "Test 17: ci admission rejects the wrong Node.js major"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  node() { echo "v23.11.0"; }
+
+  set +e
+  output="$(run_node_24_admission_check 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects Node.js outside major 24"
+  assert_contains "Node.js major 24 is required" "${output}" "Reports the required Node.js major"
+)
+
+# -----------------------------------------------------------------------------
+# Test 18: failed ci admission precedes token minting and registration
+# -----------------------------------------------------------------------------
+echo "Test 18: failed ci admission precedes token minting and registration"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  boundary_dir="${TMP_DIR}/admission_boundary"
+  mkdir -p "${boundary_dir}"
+
+  cat << 'EOF' > "${boundary_dir}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  cat << 'EOF' > "${boundary_dir}/run.sh"
+#!/usr/bin/env bash
+touch run_called
+EOF
+  chmod +x "${boundary_dir}/config.sh" "${boundary_dir}/run.sh"
+
+  GITHUB_URL="https://github.com/my-org"
+  GITHUB_PAT="dummy_pat"
+  RUNNER_DIR="${boundary_dir}"
+  RUNNER_LABELS="self-hosted,CI"
+  get_token() {
+    touch "${boundary_dir}/token_minted"
+    echo "unexpected_token"
+  }
+  gh() { return 1; }
+
+  set +e
+  main >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Main fails closed when ci admission fails"
+  assert_file_absent "${boundary_dir}/token_minted" "Does not mint a token after failed admission"
+  assert_file_absent "${boundary_dir}/config_called" "Does not register after failed admission"
+  assert_file_absent "${boundary_dir}/run_called" "Does not start the runner after failed admission"
+)
+
+# -----------------------------------------------------------------------------
+# Test 19: a non-ci label is not subject to ci admission
+# -----------------------------------------------------------------------------
+echo "Test 19: a non-ci label is not subject to ci admission"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  non_ci_dir="${TMP_DIR}/non_ci_boundary"
+  mkdir -p "${non_ci_dir}"
+
+  cat << 'EOF' > "${non_ci_dir}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  cat << 'EOF' > "${non_ci_dir}/run.sh"
+#!/usr/bin/env bash
+touch run_called
+EOF
+  chmod +x "${non_ci_dir}/config.sh" "${non_ci_dir}/run.sh"
+
+  GITHUB_URL="https://github.com/my-org"
+  GITHUB_PAT="dummy_pat"
+  RUNNER_DIR="${non_ci_dir}"
+  RUNNER_LABELS="self-hosted,circleci,ci-extra"
+  get_token() {
+    touch "${non_ci_dir}/token_minted"
+    echo "mock_token"
+  }
+  attest_ci_runner() {
+    touch "${non_ci_dir}/unexpected_attestation"
+    return 1
+  }
+
+  main >/dev/null 2>&1
+
+  assert_file_absent "${non_ci_dir}/unexpected_attestation" "Uses exact matching before requiring ci admission"
+  assert_file_exists "${non_ci_dir}/token_minted" "Mints a token for labels outside the ci contract"
+  assert_file_exists "${non_ci_dir}/config_called" "Registers labels outside the ci contract"
+  assert_file_exists "${non_ci_dir}/run_called" "Starts labels outside the ci contract"
 )
 
 echo "-----------------------------------------------------------------------------"

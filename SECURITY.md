@@ -32,6 +32,30 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 * **Instance Metadata (IMDS)**: On cloud VMs (GCP / AWS / Azure), block or restrict access to metadata servers (e.g., set IMDSv2 hop limit to `1` on AWS or restrict GCP metadata server endpoints) to prevent containerized jobs from reading VM service account tokens.
 * **Network Egress**: Restrict outbound container networking to required endpoints (GitHub API, package registries) via firewall rules or proxy filters.
 
+### Fail-Closed `ci` Capability Admission
+* **Control**: When `RUNNER_LABELS` contains the exact `ci` label, matched
+  case-insensitively to GitHub's label semantics, `entrypoint.sh`
+  exercises GitHub CLI, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git,
+  bash, curl, grep, sed, awk, find, base64, tar, and gzip before resolving any
+  registration credential.
+* **Effect**: A container cannot advertise `ci` and accept a job with a partial toolchain.
+  Failure prevents both registration-token minting and `config.sh` registration; there is
+  no caller-controlled bypass.
+* **Boundary**: Docker daemon admission proves functionality, not isolation. A `ci`
+  runner with a mounted Docker socket is host-root-equivalent and must be restricted to
+  trusted repositories and ephemeral/job-clean execution.
+
+### Image Supply-Chain Integrity
+* **GitHub CLI and Node.js**: The base image pins upstream release versions and
+  architecture-specific SHA-256 checksums published by GitHub and Node.js. Image
+  construction fails on a checksum mismatch.
+* **Published images**: BuildKit publishes SBOM and provenance attestations for the shared
+  multi-architecture base and kind images. The workflow retains a receipt binding each
+  commit-addressed tag to its immutable manifest digest.
+* **Deployment**: Rollouts should consume the recorded digest, validate `ci` admission on
+  the host, and retain the previous digest as the rollback target. Never broaden runner
+  group access as part of an image rollout.
+
 ### Immutable Workflow References
 * **Control**: Pin reusable workflow imports to full commit SHAs or governed release tags:
   ```yaml
