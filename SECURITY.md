@@ -33,7 +33,8 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 * **Network Egress**: Restrict outbound container networking to required endpoints (GitHub API, package registries) via firewall rules or proxy filters.
 
 ### Fail-Closed `ci` Capability Admission
-* **Control**: When `RUNNER_LABELS` contains the exact `ci` label, `entrypoint.sh`
+* **Control**: When `RUNNER_LABELS` contains the exact `ci` label, matched
+  case-insensitively to GitHub's label semantics, `entrypoint.sh`
   exercises GitHub CLI, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git,
   bash, curl, grep, sed, awk, find, base64, tar, and gzip before resolving any
   registration credential.
@@ -50,7 +51,7 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   construction fails on a checksum mismatch.
 * **Published images**: BuildKit publishes SBOM and provenance attestations for the shared
   multi-architecture base and kind images. The workflow retains a receipt binding each
-  immutable commit tag to its manifest digest.
+  commit-addressed tag to its immutable manifest digest.
 * **Deployment**: Rollouts should consume the recorded digest, validate `ci` admission on
   the host, and retain the previous digest as the rollback target. Never broaden runner
   group access as part of an image rollout.

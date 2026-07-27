@@ -32,14 +32,15 @@ Tequity. CI builds one shared artifact and pushes it to
 | `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, non-root) |
 | `:rust` `:node` `:python` `:go` | base + that language toolchain |
 | `:base-<version>` (e.g. `:base-v0.1.0`) | pinned release, `FROM` a tagged release |
-| `:base-<sha>`, `:<kind>-<sha>` | immutable per-commit tag — **pin this downstream** |
+| `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
 
 - **Multi-arch:** published tags are `amd64` + `arm64`.
 - The **base image ships `gh`, Node.js 24/npm, and Docker CLI + buildx + compose plugins**, so
   `[self-hosted, docker]` jobs can run `docker build --secret` (BuildKit) and
   `docker compose` against a mounted host socket.
 - Every published image includes BuildKit SBOM and provenance attestations. Each publish
-  run also retains a receipt mapping every immutable `:*-<sha>` tag to its manifest digest.
+  run also retains a receipt mapping every commit-addressed `:*-<sha>` tag to its immutable
+  manifest digest.
 
 **Two ways to consume the same image:**
 
@@ -55,8 +56,9 @@ so both paths stay in lockstep on one runner definition.
 
 ### The `ci` runner contract
 
-The exact `ci` label declares a portable capability contract shared by Verjson and
-Tequity. Before minting a registration token or running `config.sh`, the container
+The exact `ci` label (matched case-insensitively, like GitHub labels) declares a portable
+capability contract shared by Verjson and Tequity. Before minting a registration token
+or running `config.sh`, the container
 exercises `gh`, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git, bash,
 curl, grep, sed, awk, find, base64, tar, and gzip. If any check fails, startup stops and
 the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt

@@ -305,6 +305,12 @@ echo "Test 14: exact ci label matching"
   runner_labels_include_ci "self-hosted, ci ,docker"
   assert_eq "0" "$?" "Matches ci as a trimmed comma-separated label"
 
+  runner_labels_include_ci "self-hosted,CI,docker"
+  assert_eq "0" "$?" "Matches uppercase CI because GitHub labels are case-insensitive"
+
+  runner_labels_include_ci "self-hosted,Ci,docker"
+  assert_eq "0" "$?" "Matches mixed-case Ci because GitHub labels are case-insensitive"
+
   set +e
   runner_labels_include_ci "self-hosted,circleci,ci-extra"
   status=$?
@@ -413,7 +419,7 @@ EOF
   GITHUB_URL="https://github.com/my-org"
   GITHUB_PAT="dummy_pat"
   RUNNER_DIR="${boundary_dir}"
-  RUNNER_LABELS="self-hosted,ci"
+  RUNNER_LABELS="self-hosted,CI"
   get_token() {
     touch "${boundary_dir}/token_minted"
     echo "unexpected_token"

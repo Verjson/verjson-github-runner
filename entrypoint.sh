@@ -22,6 +22,7 @@ runner_labels_include_ci() {
   for label in "${labels[@]}"; do
     label="${label#"${label%%[![:space:]]*}"}"
     label="${label%"${label##*[![:space:]]}"}"
+    label="${label,,}"
     if [[ "${label}" == "ci" ]]; then
       return 0
     fi

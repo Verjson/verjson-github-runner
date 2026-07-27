@@ -17,16 +17,17 @@ provenance, and the deployed manifest.
 `ghcr.io/verjson/gha-runner` is the single runner-image artifact for both organizations.
 No organization-specific image is created.
 
-The exact `ci` label is a capability declaration. At container startup, before token
-minting or runner registration, the entrypoint must successfully exercise GitHub CLI,
+The exact `ci` label, normalized case-insensitively to match GitHub semantics, is a
+capability declaration. At container startup, before token minting or runner registration,
+the entrypoint must successfully exercise GitHub CLI,
 Docker daemon access, Docker Compose, Docker Buildx, Node.js 24, npm, jq, git, bash,
 curl, grep, sed, awk, find, base64, tar, and gzip. Admission is mandatory whenever `ci`
 is present as a comma-separated label.
 
 The image pins the GitHub CLI and Node.js 24 releases and verifies architecture-specific
 upstream SHA-256 checksums during the build. The publish workflow produces
-multi-architecture, immutable commit tags with BuildKit SBOM and provenance attestations
-and retains source-to-digest receipts for base and kind images.
+multi-architecture, commit-addressed tags with BuildKit SBOM and provenance attestations
+and retains receipts that bind base and kind tags to immutable manifest digests.
 
 Infrastructure rollout is separate. Consumers deploy the recorded digest, preserve
 ephemeral/job-clean isolation and existing runner-group allowlists, validate admission,
