@@ -30,8 +30,10 @@ func TestDockerRunnerLifecycle(t *testing.T) {
 	t.Run("ephemeral invocations use different clean writable layers", func(t *testing.T) {
 		spec := lifecycleSpec("ephemeral-fresh", image, true)
 		first := startAndObserve(t, spec)
+		waitForLog(t, spec.Container(), "writable-layer marker absent")
 		waitForContainerAbsence(t, spec.Container())
 		second := startAndObserve(t, spec)
+		waitForLog(t, spec.Container(), "writable-layer marker absent")
 		waitForContainerAbsence(t, spec.Container())
 
 		if first == second {

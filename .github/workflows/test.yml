@@ -19,6 +19,7 @@ jobs:
           bash tests/entrypoint_test.sh
           bash tests/ephemeral_mode_test.sh
           bash tests/entrypoint_lifecycle_test.sh
+          bash tests/runner_supervision_test.sh
           bash tests/launcher_policy_test.sh
 
   go-tests:

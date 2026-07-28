@@ -11,6 +11,7 @@ if test -e /tmp/verjson-job-marker; then
   echo "writable-layer marker persisted" >&2
   exit 91
 fi
+echo "writable-layer marker absent"
 touch /tmp/verjson-job-marker
 cat /etc/hostname
 

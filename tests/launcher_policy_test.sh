@@ -63,6 +63,15 @@ grep -q 'RUNNER_EPHEMERAL=1' "${REPO_ROOT}/setup.ps1" || {
   echo "setup.ps1 cannot launch one-job registration" >&2
   exit 1
 }
+for launcher in \
+  "${REPO_ROOT}/setup.sh" \
+  "${REPO_ROOT}/setup.ps1" \
+  "${REPO_ROOT}/app/internal/dockerx/dockerx.go"; do
+  if grep -q -- '--entrypoint' "${launcher}"; then
+    echo "${launcher} bypasses the image entrypoint credential boundary" >&2
+    exit 1
+  fi
+done
 
 compose_env="${TMP_DIR}/compose.env"
 cat > "${compose_env}" <<'EOF'
@@ -78,7 +87,9 @@ compose_json="$(
 )"
 jq -e '
   .services.runner.environment.RUNNER_EPHEMERAL == "0" and
+  .services.runner.entrypoint == null and
   .services["runner-ephemeral"].environment.RUNNER_EPHEMERAL == "1" and
+  .services["runner-ephemeral"].entrypoint == null and
   .services["runner-ephemeral"].restart == "no"
 ' <<< "${compose_json}" >/dev/null || {
   echo "Compose does not separate persistent and ephemeral lifecycle policies" >&2

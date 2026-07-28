@@ -38,6 +38,19 @@ An external supervisor may remain long-lived, but it may only replenish
 ephemeral capacity by creating a new disposable container. It must not restart
 or adopt a completed job container.
 
+Inside each container, the entrypoint supervises the pinned Actions runner
+wrapper → helper → `Runner.Listener`/`Runner.Worker` topology as one dedicated
+process group. Shutdown sends TERM to the whole group, waits five seconds, and
+sends a group-wide KILL if needed. De-registration begins only after the group is
+gone. This avoids treating the wrapper PID as if it were the actual listener.
+
+Registration and removal sources are captured into non-exported supervisor
+variables and unset from the imported container environment. The registration
+token is cleared after `config.sh`, and the scheduled Listener/Worker tree is
+started through a credential-scrubbing environment boundary. This applies to
+the manager, shell, PowerShell, and Compose launch paths because they all use the
+same image entrypoint.
+
 The `gha` manager and both setup scripts construct the lifecycle flags. Compose
 exposes separate services; ephemeral use is supported only through
 `docker compose --profile ephemeral run --rm runner-ephemeral`.
@@ -46,10 +59,12 @@ exposes separate services; ephemeral use is supported only through
 
 - Unit tests for explicit true, false, empty, and invalid parsing.
 - Entrypoint tests for token refresh, registration, de-registration, normal exit,
-  runner crash, and shutdown signal forwarding.
-- Docker integration tests proving different container IDs, marker
-  non-persistence, crash removal without a restart loop, shutdown removal, and
-  persistent-mode compatibility.
+  runner crash, and topology-faithful process-group shutdown.
+- Explicit Listener and Worker environment tests proving token, PAT, mint/remove
+  command, cloud, Docker auth, and broad credential variables are absent.
+- Docker integration tests proving different container IDs, an observable and
+  asserted marker-absence verdict, crash removal without a restart loop,
+  shutdown removal, and persistent-mode compatibility.
 - Independent security review and explicit human acceptance of the exact
   implementation head.
 
@@ -59,6 +74,8 @@ exposes separate services; ephemeral use is supported only through
   reconciler must deliberately create the next clean container.
 - A crashed one-job runner disappears instead of retrying registration in the
   compromised writable layer.
+- Shutdown latency can increase by up to five seconds when a runner process
+  ignores TERM; it is then killed before removal credentials are used.
 - Operators needing stable trusted capacity may keep persistent mode, accepting
   its cross-restart state-retention boundary.
 - This decision does not authorize deployment, runner-group access changes, or

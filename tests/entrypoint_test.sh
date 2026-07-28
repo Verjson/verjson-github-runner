@@ -77,7 +77,7 @@ echo "Test 1: resolve_token with GITHUB_PAT"
   GITHUB_PAT="dummy_pat"
   get_token() { echo "mock_pat_token"; }
   resolve_token
-  assert_eq "mock_pat_token" "${RUNNER_TOKEN}" "Resolves token via GITHUB_PAT"
+  assert_eq "mock_pat_token" "${runner_registration_token}" "Resolves token via GITHUB_PAT"
 )
 
 # -----------------------------------------------------------------------------
@@ -89,7 +89,7 @@ echo "Test 2: resolve_token with RUNNER_TOKEN_CMD"
   unset GITHUB_PAT RUNNER_TOKEN_CMD RUNNER_TOKEN || true
   RUNNER_TOKEN_CMD="echo mock_cmd_token"
   resolve_token
-  assert_eq "mock_cmd_token" "${RUNNER_TOKEN}" "Resolves token via RUNNER_TOKEN_CMD"
+  assert_eq "mock_cmd_token" "${runner_registration_token}" "Resolves token via RUNNER_TOKEN_CMD"
 )
 
 # -----------------------------------------------------------------------------
@@ -101,7 +101,7 @@ echo "Test 3: resolve_token with static RUNNER_TOKEN"
   unset GITHUB_PAT RUNNER_TOKEN_CMD RUNNER_TOKEN || true
   RUNNER_TOKEN="mock_static_token"
   resolve_token
-  assert_eq "mock_static_token" "${RUNNER_TOKEN}" "Preserves static RUNNER_TOKEN"
+  assert_eq "mock_static_token" "${runner_registration_token}" "Preserves static RUNNER_TOKEN"
 )
 
 # -----------------------------------------------------------------------------

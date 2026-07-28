@@ -35,13 +35,26 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   runner crash cannot reconfigure inside the same writable layer or settle into a
   restart loop. Re-registration requires a new invocation and a freshly minted
   registration token.
+* **Process-tree shutdown**: The entrypoint launches the pinned Actions runner
+  `run.sh` → `run-helper.sh` → `Runner.Listener`/`Runner.Worker` topology in a
+  dedicated process group. Completion and operator shutdown must leave that group
+  empty before de-registration; TERM has a five-second bound followed by a
+  group-wide KILL.
+* **Credential inheritance**: Registration and removal credentials are captured
+  into non-exported supervisor state and removed from the environment before
+  `Runner.Listener` starts. Listener/Worker descendants also receive an
+  functional, credential-scrubbed environment that removes token, PAT,
+  secret, password, authentication, private-key, access-key, Docker auth, cloud
+  credential, and kubeconfig variables. The one-shot registration token is
+  cleared immediately after `config.sh`.
 
 ### Persistent Runners (lower isolation)
 * **Control**: `RUNNER_EPHEMERAL=0`, `false`, or empty preserves
   `--restart unless-stopped` for hosts that deliberately need stable capacity.
 * **Boundary**: Container identity, workspace, caches, and writable-layer state can
   survive restarts. Persistent runners must not execute untrusted pull-request
-  code and must be restricted to reviewed private workflows.
+  code and must be restricted to reviewed private workflows. Process-group
+  shutdown and scheduled-child credential scrubbing apply in both modes.
 
 ### Least-Privilege Workflow Permissions
 * **Control**: Specify explicit `permissions:` blocks in all workflow definitions:

@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install every standard utility exercised by the portable ci admission contract.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates coreutils curl findutils gawk git grep gzip jq sed \
-      sudo tar xz-utils \
+      sudo tar util-linux xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI release archives are pinned and verified against GitHub's published checksums.

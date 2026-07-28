@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Base tools (git/curl/jq for token fetch; the runner needs libicu etc. via installdependencies.sh)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl jq git sudo tar gzip \
+      ca-certificates curl jq git sudo tar gzip util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # The runner refuses to run as root -> dedicated user

@@ -311,6 +311,11 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_REMOVE_TOKEN_CMD` — optional command that prints a fresh removal token
     on container cleanup/stop.
   - `RUNNER_TOKEN` — a one-shot token (expires ~1h; stop leaves an offline "ghost").
+  The entrypoint captures these values into non-exported supervisor state, unsets
+  the imported variables, and clears the registration token immediately after
+  `config.sh`. The scheduled `Runner.Listener` and `Runner.Worker` process tree
+  receives a credential-scrubbed environment; removal credentials remain only in
+  the supervisor for shutdown cleanup.
 - **Environment overrides** (`entrypoint.sh`):
   - `RUNNER_DIR` — optional working directory override containing `actions-runner` binaries (defaults to `/home/runner/actions-runner`).
   - `RUNNER_EPHEMERAL` — `1`/`true` enables one-job registration;
@@ -318,6 +323,10 @@ to it, so you can ignore groups entirely unless you want the access control.
     Registration alone does not destroy a Docker writable layer. Use the `gha`
     manager, setup scripts, Compose `run --rm`, or a provider supervisor that
     creates a fresh `--rm` container with no restart policy for every job.
+    The entrypoint starts the pinned `run.sh` → `run-helper.sh` →
+    `Runner.Listener`/`Runner.Worker` topology in one dedicated process group.
+    Shutdown sends TERM to the complete group, waits up to five seconds, and then
+    fails closed with a group-wide KILL before de-registration if anything remains.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
     bypass startup admission.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose

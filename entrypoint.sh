@@ -14,6 +14,14 @@ set -euo pipefail
 #   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
 #   RUNNER_EPHEMERAL — optional, 1/true enables one-job registration; 0/false/empty disables it
 
+runner_credentials_captured=false
+runner_github_pat=""
+runner_registration_token=""
+runner_token_command=""
+runner_remove_token_command=""
+runner_pid=""
+runner_pgid=""
+
 parse_runner_ephemeral() {
   case "${RUNNER_EPHEMERAL:-}" in
     1|[Tt][Rr][Uu][Ee])
@@ -99,7 +107,7 @@ attest_ci_runner() {
 
 get_token() {  # $1 = registration | remove
   curl -fsSL -X POST \
-    -H "Authorization: Bearer ${GITHUB_PAT}" \
+    -H "Authorization: Bearer ${runner_github_pat}" \
     -H "Accept: application/vnd.github+json" \
     "${api_base}/${1}-token" | jq -r .token
 }
@@ -128,33 +136,119 @@ parse_github_url() {
 #                      is the VM's App-key mint script, so no PAT/private key ever lands on the box.
 #   RUNNER_REMOVE_TOKEN_CMD — optional command that prints a fresh removal token on cleanup/stop.
 #   RUNNER_TOKEN     — a one-shot token (expires in ~1h; no refresh).
+capture_runner_credentials() {
+  runner_github_pat="${GITHUB_PAT:-}"
+  runner_registration_token="${RUNNER_TOKEN:-}"
+  runner_token_command="${RUNNER_TOKEN_CMD:-}"
+  runner_remove_token_command="${RUNNER_REMOVE_TOKEN_CMD:-}"
+  runner_credentials_captured=true
+  export -n \
+    runner_github_pat \
+    runner_registration_token \
+    runner_token_command \
+    runner_remove_token_command
+
+  # Imported Docker environment variables are exported by default. Keep the
+  # registration material only in this supervising shell so Runner.Listener and
+  # every scheduled Runner.Worker cannot inherit it.
+  unset GITHUB_PAT RUNNER_TOKEN RUNNER_TOKEN_CMD RUNNER_REMOVE_TOKEN_CMD
+}
+
 resolve_token() {
-  if [[ -n "${GITHUB_PAT:-}" ]]; then
-    RUNNER_TOKEN="$(get_token registration)"
-  elif [[ -n "${RUNNER_TOKEN_CMD:-}" ]]; then
-    RUNNER_TOKEN="$(eval "${RUNNER_TOKEN_CMD}")"
+  if [[ "${runner_credentials_captured}" != "true" ]]; then
+    capture_runner_credentials
   fi
-  : "${RUNNER_TOKEN:?Provide GITHUB_PAT (recommended), RUNNER_TOKEN_CMD, or a one-shot RUNNER_TOKEN}"
+  if [[ -n "${runner_github_pat}" ]]; then
+    runner_registration_token="$(get_token registration)"
+  elif [[ -n "${runner_token_command}" ]]; then
+    runner_registration_token="$(eval "${runner_token_command}")"
+  fi
+  : "${runner_registration_token:?Provide GITHUB_PAT (recommended), RUNNER_TOKEN_CMD, or a one-shot RUNNER_TOKEN}"
 }
 
 cleanup() {
+  if [[ "${runner_credentials_captured}" != "true" ]]; then
+    capture_runner_credentials
+  fi
   echo "De-registering runner..."
-  if [[ -n "${GITHUB_PAT:-}" ]]; then
+  if [[ -n "${runner_github_pat}" ]]; then
     ./config.sh remove --token "$(get_token remove)" || ./config.sh remove --local || true
-  elif [[ -n "${RUNNER_REMOVE_TOKEN_CMD:-}" ]]; then
-    ./config.sh remove --token "$(eval "${RUNNER_REMOVE_TOKEN_CMD}")" || ./config.sh remove --local || true
+  elif [[ -n "${runner_remove_token_command}" ]]; then
+    ./config.sh remove --token "$(eval "${runner_remove_token_command}")" || ./config.sh remove --local || true
   else
     ./config.sh remove --local || true
   fi
 }
 
+credential_environment_name() {
+  local name="${1^^}"
+
+  case "${name}" in
+    TOKEN|*_TOKEN|*_TOKEN_*|PAT|*_PAT|*_PAT_*|SECRET|*_SECRET|*_SECRET_*|\
+    PASSWORD|*_PASSWORD|*_PASSWORD_*|PASSWD|*_PASSWD|*_PASSWD_*|\
+    CREDENTIAL|CREDENTIALS|*_CREDENTIAL|*_CREDENTIALS|*_CREDENTIAL_*|*_CREDENTIALS_*|\
+    PRIVATE_KEY|*_PRIVATE_KEY|*_PRIVATE_KEY_*|ACCESS_KEY|*_ACCESS_KEY|*_ACCESS_KEY_*|\
+    AUTH|*_AUTH|*_AUTH_*|JWT|*_JWT|*_JWT_*|KUBECONFIG|NETRC|\
+    AWS_PROFILE|AWS_CONFIG_FILE|AZURE_CONFIG_DIR|NPM_CONFIG_USERCONFIG|GIT_ASKPASS|SSH_ASKPASS|\
+    BASH_ENV|ENV|SHELLOPTS|BASHOPTS|CDPATH|GLOBIGNORE|PS4|PROMPT_COMMAND|\
+    LD_PRELOAD|LD_LIBRARY_PATH)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+build_runner_environment() {
+  local name
+
+  runner_environment=(env)
+  while IFS='=' read -r name _; do
+    if credential_environment_name "${name}"; then
+      runner_environment+=(-u "${name}")
+    fi
+  done < <(env)
+  # The entrypoint owns the process group. Do not allow an inherited setting to
+  # switch the pinned run.sh wrapper into its own job-control topology.
+  runner_environment+=(-u RUNNER_MANUALLY_TRAP_SIG)
+}
+
+runner_group_alive() {
+  [[ -n "${runner_pgid:-}" ]] && kill -0 -- "-${runner_pgid}" 2>/dev/null
+}
+
+wait_for_runner_group_exit() {
+  local attempt
+
+  for attempt in $(seq 1 50); do
+    if ! runner_group_alive; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+terminate_runner_group() {
+  if runner_group_alive; then
+    kill -TERM -- "-${runner_pgid}" 2>/dev/null || true
+    if ! wait_for_runner_group_exit; then
+      echo "Runner process group did not stop within 5 seconds; forcing termination." >&2
+      kill -KILL -- "-${runner_pgid}" 2>/dev/null || true
+      wait_for_runner_group_exit || true
+    fi
+  fi
+  if [[ -n "${runner_pid:-}" ]]; then
+    wait "${runner_pid}" 2>/dev/null || true
+  fi
+  runner_pid=""
+  runner_pgid=""
+}
+
 stop_runner() {
   local status="$1"
 
-  if [[ -n "${runner_pid:-}" ]] && kill -0 "${runner_pid}" 2>/dev/null; then
-    kill -TERM "${runner_pid}" 2>/dev/null || true
-    wait "${runner_pid}" 2>/dev/null || true
-  fi
+  trap - SIGINT SIGTERM
+  terminate_runner_group
   exit "${status}"
 }
 
@@ -190,32 +284,43 @@ main() {
   fi
 
   parse_github_url
+  if ! command -v setsid >/dev/null 2>&1; then
+    echo "Runner lifecycle admission failed: setsid is required for process-group supervision." >&2
+    return 1
+  fi
   resolve_token
 
-  runner_pid=""
   trap 'stop_runner 130' SIGINT
   trap 'stop_runner 143' SIGTERM
   trap cleanup EXIT
 
   ./config.sh \
     --url "${GITHUB_URL}" \
-    --token "${RUNNER_TOKEN}" \
+    --token "${runner_registration_token}" \
     --name "${RUNNER_NAME}" \
     --labels "${RUNNER_LABELS}" \
     --work "${RUNNER_WORKDIR}" \
     "${group_arg[@]}" \
     --unattended --replace \
     "${ephemeral_arg[@]}"
+  runner_registration_token=""
 
-  # run.sh in the background + wait so stop signals reach the runner process and
-  # every terminal path (success, crash, or shutdown) attempts de-registration.
-  ./run.sh &
+  # Keep the pinned run.sh -> run-helper.sh -> Runner.Listener/Worker topology in
+  # one dedicated process group. The listener receives no launcher credential
+  # material, and every terminal path stops the whole group before deregistration.
+  build_runner_environment
+  "${runner_environment[@]}" setsid ./run.sh &
   runner_pid=$!
+  runner_pgid=$runner_pid
   set +e
   wait "${runner_pid}"
   runner_status=$?
   set -e
+  if runner_group_alive; then
+    terminate_runner_group
+  fi
   runner_pid=""
+  runner_pgid=""
   return "${runner_status}"
 }
 
