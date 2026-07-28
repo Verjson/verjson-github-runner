@@ -2,6 +2,8 @@
 
 ## 2026-07-28
 
+- Preserve the shared dependency-update policy locally so Renovate can operate
+  without resolving an inaccessible private organization preset.
 - Pin every third-party action in the shell and Go test workflow to its reviewed
   immutable commit SHA while retaining Renovate-readable major-version comments
   (#39).
