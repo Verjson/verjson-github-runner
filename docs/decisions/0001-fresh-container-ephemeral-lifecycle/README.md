@@ -27,6 +27,13 @@ environment was not.
    registers with `--ephemeral`, executes at most one job, exits, and is deleted
    before the next generation.
 
+For the `untrusted-pr` tier, admission additionally requires the canonical
+`self-hosted,isolated,linux,x64,untrusted-pr,ephemeral,no-host-docker` labels, a
+non-Default group, digest-pinned image, and a dedicated metadata-denying child
+network. Registration tokens cross the controller boundary only over stdin,
+never Docker argv or inspectable environment. Secret-free admission and
+verified child-removal receipts are emitted for each generation.
+
 The controller passes no Docker socket into a child unless the operator
 explicitly selects the trusted Docker option. Supervisor mode rejects static
 one-shot registration tokens because it must mint a fresh token for every

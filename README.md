@@ -324,6 +324,10 @@ to it, so you can ignore groups entirely unless you want the access control.
     fresh child generation.
   - `RUNNER_CHILD_MOUNT_SOCK` — defaults off. Set to `1` only for trusted jobs
     that intentionally receive the host-root-equivalent Docker socket.
+  - `RUNNER_CHILD_NETWORK` — dedicated Docker network whose host firewall denies
+    `169.254.169.254`; required for `untrusted-pr` runners.
+  - `RUNNER_METADATA_DENY_ATTEST_CMD` — controller command that must attest the
+    child network's metadata denial before every isolated generation.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
     bypass startup admission.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
