@@ -105,6 +105,14 @@ It reuses your **GitHub CLI** login, so there's **no PAT to paste** — it fetch
 registration tokens for you. You pick how many runners you want and **which languages**,
 and it builds the right toolchain images and launches everything.
 
+When the wizard's **Ephemeral runners** option is enabled, `gha` launches a
+long-lived controller container, not a reusable job runner. The controller holds
+the renewable registration credential and Docker socket, then starts each job in
+a new `docker run --rm` child. The child receives no Docker socket unless the
+operator separately enables the trusted Docker option. After the one-job GitHub
+runner exits, Docker deletes its writable layer and the controller creates a new
+container for the next job.
+
 ### Prerequisites
 - **Docker** (Engine or Desktop) running
 - **[GitHub CLI](https://cli.github.com)** installed and logged in: `gh auth login`
@@ -305,7 +313,15 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_TOKEN` — a one-shot token (expires ~1h; stop leaves an offline "ghost").
 - **Environment overrides** (`entrypoint.sh`):
   - `RUNNER_DIR` — optional working directory override containing `actions-runner` binaries (defaults to `/home/runner/actions-runner`).
-  - `RUNNER_EPHEMERAL` — if set to `1` or `true`, passes `--ephemeral` to `./config.sh` so the runner tears down after completing a single job.
+  - `RUNNER_EPHEMERAL` — explicit boolean (`true/false`, `1/0`, `yes/no`, or
+    `on/off`). The `gha` manager uses it with supervisor mode so every job gets a
+    new `--rm` child container. A direct runner refuses ephemeral mode unless an
+    external one-job orchestrator also sets `RUNNER_FRESH_CONTAINER=1`; merely
+    restarting the same Docker container is not isolation.
+  - `RUNNER_IMAGE` — immutable image reference used by supervisor mode for each
+    fresh child generation.
+  - `RUNNER_CHILD_MOUNT_SOCK` — defaults off. Set to `1` only for trusted jobs
+    that intentionally receive the host-root-equivalent Docker socket.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
     bypass startup admission.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
@@ -313,7 +329,7 @@ to it, so you can ignore groups entirely unless you want the access control.
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in
   `docker-compose.yml`). This grants host root-equivalent access — trusted private
   repos only.
-- **Security & Hardening:** See [SECURITY.md](SECURITY.md) for full threat model details, ephemeral runner enforcement (`RUNNER_EPHEMERAL=1`), least-privilege token permissions, IMDS isolation, and incident response procedures.
+- **Security & Hardening:** See [SECURITY.md](SECURITY.md) for the tested fresh-container ephemeral lifecycle, least-privilege token permissions, IMDS isolation, and incident response procedures.
 - **Availability:** keep the host awake (disable sleep) or jobs queue while it's off.
 - **Update the runner:** bump `RUNNER_VERSION` in the `Dockerfile`, then
   `docker compose up -d --build`.

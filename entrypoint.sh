@@ -12,7 +12,104 @@ set -euo pipefail
 #   RUNNER_LABELS    — optional, comma-separated runner labels (defaults to self-hosted,linux,x64,docker)
 #   RUNNER_GROUP     — optional, org runner group name (defaults to Default)
 #   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
-#   RUNNER_EPHEMERAL — optional, if set to 1/true, passes --ephemeral to config.sh (single-job teardown)
+#   RUNNER_EPHEMERAL — optional boolean; true runs one job in this container
+#   RUNNER_IMAGE     — supervisor mode only; immutable image used for fresh job containers
+#   RUNNER_CHILD_MOUNT_SOCK — supervisor mode only; explicitly mount Docker into job containers
+#   RUNNER_EPHEMERAL_MAX_JOBS — supervisor test/canary bound; 0 means supervise forever
+
+normalize_ephemeral_mode() {
+  local value="${RUNNER_EPHEMERAL:-false}"
+  value="${value,,}"
+  case "${value}" in
+    1|true|yes|on) RUNNER_EPHEMERAL_ENABLED=1 ;;
+    ''|0|false|no|off) RUNNER_EPHEMERAL_ENABLED=0 ;;
+    *)
+      echo "RUNNER_EPHEMERAL must be one of true/false, 1/0, yes/no, or on/off; got '${RUNNER_EPHEMERAL}'." >&2
+      return 1 ;;
+  esac
+}
+
+append_child_env() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]]; then
+    child_args+=(-e "${name}=${!name}")
+  fi
+}
+
+stop_ephemeral_child() {
+  if [[ -n "${EPHEMERAL_CHILD_NAME:-}" ]]; then
+    docker stop --time 10 "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
+    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
+  fi
+}
+
+supervise_ephemeral() {
+  : "${RUNNER_IMAGE:?Supervisor mode requires RUNNER_IMAGE}"
+  : "${RUNNER_NAME:?Supervisor mode requires RUNNER_NAME}"
+  : "${GITHUB_URL:?Supervisor mode requires GITHUB_URL}"
+  if [[ -z "${GITHUB_PAT:-}" && -z "${RUNNER_TOKEN_CMD:-}" ]]; then
+    echo "Ephemeral supervision requires GITHUB_PAT or RUNNER_TOKEN_CMD so every fresh job container can register." >&2
+    return 1
+  fi
+
+  normalize_ephemeral_mode || return 1
+  if [[ "${RUNNER_EPHEMERAL_ENABLED}" != 1 ]]; then
+    echo "Supervisor mode requires RUNNER_EPHEMERAL=true." >&2
+    return 1
+  fi
+
+  local max_jobs="${RUNNER_EPHEMERAL_MAX_JOBS:-0}"
+  if [[ ! "${max_jobs}" =~ ^[0-9]+$ ]]; then
+    echo "RUNNER_EPHEMERAL_MAX_JOBS must be a non-negative integer." >&2
+    return 1
+  fi
+
+  EPHEMERAL_CHILD_NAME="gha-${RUNNER_NAME}-job"
+  trap 'stop_ephemeral_child; exit 0' SIGINT SIGTERM
+  local completed=0
+  while :; do
+    # Remove a child left by a killed/restarted supervisor before accepting
+    # another job. The exact name is derived from the configured runner name.
+    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
+
+    child_args=(
+      run --rm
+      --name "${EPHEMERAL_CHILD_NAME}"
+      --label "gha.ephemeral-job=true"
+      -e "GITHUB_URL=${GITHUB_URL}"
+      -e "RUNNER_NAME=${RUNNER_NAME}"
+      -e "RUNNER_LABELS=${RUNNER_LABELS:-self-hosted,linux,x64}"
+      -e "RUNNER_GROUP=${RUNNER_GROUP:-Default}"
+      -e "RUNNER_WORKDIR=${RUNNER_WORKDIR:-_work}"
+      -e "RUNNER_EPHEMERAL=1"
+      -e "RUNNER_FRESH_CONTAINER=1"
+    )
+    append_child_env GITHUB_PAT
+    append_child_env RUNNER_TOKEN_CMD
+    append_child_env RUNNER_REMOVE_TOKEN_CMD
+    append_child_env HTTPS_PROXY
+    append_child_env HTTP_PROXY
+    append_child_env NO_PROXY
+    append_child_env https_proxy
+    append_child_env http_proxy
+    append_child_env no_proxy
+    if [[ "${RUNNER_CHILD_MOUNT_SOCK:-0}" == 1 ]]; then
+      child_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+    fi
+    child_args+=("${RUNNER_IMAGE}")
+
+    echo "Starting fresh ephemeral job container ${EPHEMERAL_CHILD_NAME} (generation $((completed + 1)))..."
+    if ! docker "${child_args[@]}"; then
+      echo "Ephemeral job container exited unsuccessfully; recreating a clean container after backoff." >&2
+      sleep 5
+    fi
+    completed=$((completed + 1))
+    if [[ "${max_jobs}" -gt 0 && "${completed}" -ge "${max_jobs}" ]]; then
+      echo "Ephemeral supervisor reached its ${max_jobs}-job bound."
+      return 0
+    fi
+  done
+}
 
 runner_labels_include_ci() {
   local label
@@ -134,6 +231,10 @@ main() {
     attest_ci_runner
     return $?
   fi
+  if [[ "${1:-}" == "supervise" ]]; then
+    supervise_ephemeral
+    return $?
+  fi
 
   : "${GITHUB_URL:?Set GITHUB_URL, e.g. https://github.com/your-org or https://github.com/you/repo}"
   cd "${RUNNER_DIR:-/home/runner/actions-runner}"
@@ -142,6 +243,11 @@ main() {
   RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
   RUNNER_GROUP="${RUNNER_GROUP:-Default}"
   RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
+  normalize_ephemeral_mode || return 1
+  if [[ "${RUNNER_EPHEMERAL_ENABLED}" == 1 && "${RUNNER_FRESH_CONTAINER:-0}" != 1 ]]; then
+    echo "RUNNER_EPHEMERAL requires a fresh disposable container. Use the gha supervisor or set RUNNER_FRESH_CONTAINER=1 only from an external one-job container orchestrator." >&2
+    return 1
+  fi
 
   # Advertising "ci" is a capability claim. Prove the complete contract before any
   # registration credential is minted or config.sh can make the runner schedulable.
@@ -160,14 +266,21 @@ main() {
 
   trap cleanup SIGINT SIGTERM
 
+  config_args=(
+    --url "${GITHUB_URL}"
+    --token "${RUNNER_TOKEN}"
+    --name "${RUNNER_NAME}"
+    --labels "${RUNNER_LABELS}"
+    --work "${RUNNER_WORKDIR}"
+    "${group_arg[@]}"
+    --unattended --replace
+  )
+  if [[ "${RUNNER_EPHEMERAL_ENABLED}" == 1 ]]; then
+    config_args+=(--ephemeral)
+  fi
+
   ./config.sh \
-    --url "${GITHUB_URL}" \
-    --token "${RUNNER_TOKEN}" \
-    --name "${RUNNER_NAME}" \
-    --labels "${RUNNER_LABELS}" \
-    --work "${RUNNER_WORKDIR}" \
-    "${group_arg[@]}" \
-    --unattended --replace ${RUNNER_EPHEMERAL:+--ephemeral}
+    "${config_args[@]}"
 
   # run.sh in the background + wait so the trap can fire on stop
   ./run.sh & wait $!

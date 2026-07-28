@@ -64,6 +64,16 @@ func (s RunSpec) Container() string { return Prefix + s.Name }
 func Run(s RunSpec) (string, error) {
 	_ = exec.Command("docker", "rm", "-f", s.Container()).Run() // replace if it exists
 
+	args := runArgs(s)
+
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker run %s: %w: %s", s.Container(), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func runArgs(s RunSpec) []string {
 	args := []string{
 		"run", "-d",
 		"--name", s.Container(),
@@ -78,7 +88,20 @@ func Run(s RunSpec) (string, error) {
 		"-e", "RUNNER_WORKDIR=" + s.Workdir,
 	}
 	if s.Ephemeral {
-		args = append(args, "-e", "RUNNER_EPHEMERAL=1")
+		// The long-lived container is a credential-holding host controller only;
+		// workflow code executes in a new --rm child container for every job.
+		// Root + the Docker socket are confined to this supervisor. The child
+		// receives the socket only when MountSock is explicitly selected.
+		args = append(args,
+			"--user", "0:0",
+			"--label", "gha.mode=ephemeral-supervisor",
+			"-v", "/var/run/docker.sock:/var/run/docker.sock",
+			"-e", "RUNNER_EPHEMERAL=1",
+			"-e", "RUNNER_IMAGE="+s.Image,
+		)
+		if s.MountSock {
+			args = append(args, "-e", "RUNNER_CHILD_MOUNT_SOCK=1")
+		}
 	}
 	if s.Proxy != "" {
 		// Set both upper- and lower-case variants; the runner, git, and curl differ on which they read.
@@ -89,16 +112,14 @@ func Run(s RunSpec) (string, error) {
 	if s.NoProxy != "" {
 		args = append(args, "-e", "NO_PROXY="+s.NoProxy, "-e", "no_proxy="+s.NoProxy)
 	}
-	if s.MountSock {
+	if s.MountSock && !s.Ephemeral {
 		args = append(args, "-v", "/var/run/docker.sock:/var/run/docker.sock")
 	}
 	args = append(args, s.Image)
-
-	out, err := exec.Command("docker", args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("docker run %s: %w: %s", s.Container(), err, strings.TrimSpace(string(out)))
+	if s.Ephemeral {
+		args = append(args, "supervise")
 	}
-	return strings.TrimSpace(string(out)), nil
+	return args
 }
 
 // Runner is one managed container's live snapshot.
