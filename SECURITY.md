@@ -31,10 +31,13 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   `RUNNER_FRESH_CONTAINER=1` from an external one-job orchestrator; setting
   `--ephemeral` inside a Docker container configured with `restart:
   unless-stopped` is explicitly not accepted as isolation.
-* **Controller boundary**: The controller holds the renewable registration
-  credential and host Docker socket but never executes workflow code. Job
-  children receive no socket by default. Enabling
-  `RUNNER_CHILD_MOUNT_SOCK=1` is a separate trusted-only decision.
+* **Controller boundary**: The controller alone holds the renewable
+  `GITHUB_PAT` or `RUNNER_TOKEN_CMD` credential and the host Docker socket. It
+  mints a short-lived, one-shot registration token for each job child; the
+  renewable credential and removal-token command are never forwarded. The
+  child discards registration material before executing workflow code and
+  receives no socket by default. Enabling `RUNNER_CHILD_MOUNT_SOCK=1` is a
+  separate trusted-only decision.
 
 ### Least-Privilege Workflow Permissions
 * **Control**: Specify explicit `permissions:` blocks in all workflow definitions:

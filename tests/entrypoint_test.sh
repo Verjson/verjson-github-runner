@@ -40,6 +40,19 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local needle="$1"
+  local haystack="$2"
+  local msg="$3"
+  if [[ "$haystack" != *"${needle}"* ]]; then
+    echo "  ✓ ${msg}"
+    touch "${TMP_DIR}/passed_$(date +%s%N)_$RANDOM"
+  else
+    echo "  ✗ ${msg} (unexpected substring '${needle}' in '${haystack}')"
+    touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"
+  fi
+}
+
 assert_file_exists() {
   local path="$1"
   local msg="$2"
@@ -276,6 +289,9 @@ EOF
   cat << 'EOF' > "${TEST_RUNNER_DIR}/run.sh"
 #!/usr/bin/env bash
 echo "run.sh executed" >> run_exec.log
+if env | grep -Eq '^(RUNNER_TOKEN|GITHUB_PAT|RUNNER_TOKEN_CMD|RUNNER_REMOVE_TOKEN_CMD)='; then
+  touch credential_exposed
+fi
 EOF
   chmod +x "${TEST_RUNNER_DIR}/config.sh" "${TEST_RUNNER_DIR}/run.sh"
 
@@ -295,6 +311,7 @@ EOF
 
   assert_contains "--ephemeral" "$(< "${TEST_RUNNER_DIR}/config_args.log")" "Passes --ephemeral flag when RUNNER_EPHEMERAL is set"
   assert_contains "run.sh executed" "$(< "${TEST_RUNNER_DIR}/run_exec.log")" "Launches run.sh in working directory"
+  assert_file_absent "${TEST_RUNNER_DIR}/credential_exposed" "Discards registration credentials before workflow execution"
 )
 
 # -----------------------------------------------------------------------------
@@ -601,6 +618,11 @@ echo "Test 23: ephemeral supervisor child lifecycle"
     printf '%s\n' "$*" >> "${docker_log}"
     return 0
   }
+  mint_count=0
+  resolve_token() {
+    mint_count=$((mint_count + 1))
+    RUNNER_TOKEN="job-token-${mint_count}"
+  }
   sleep() { :; }
 
   GITHUB_URL="https://github.com/Verjson/test"
@@ -620,6 +642,11 @@ echo "Test 23: ephemeral supervisor child lifecycle"
   assert_eq "2" "${remove_count}" "Sweeps a stale child before every generation"
   assert_contains "RUNNER_EPHEMERAL=1" "$(< "${docker_log}")" "Marks every child runner one-job ephemeral"
   assert_contains "RUNNER_FRESH_CONTAINER=1" "$(< "${docker_log}")" "Marks the supervisor-created child as a fresh layer"
+  assert_contains "RUNNER_TOKEN=job-token-1" "$(< "${docker_log}")" "Passes a one-shot token to the first child"
+  assert_contains "RUNNER_TOKEN=job-token-2" "$(< "${docker_log}")" "Mints a distinct one-shot token for the next child"
+  assert_not_contains "GITHUB_PAT=" "$(< "${docker_log}")" "Does not expose the renewable PAT to job children"
+  assert_not_contains "RUNNER_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose the token-mint command to job children"
+  assert_not_contains "RUNNER_REMOVE_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose removal credentials to job children"
   if grep '^run --rm ' "${docker_log}" | grep -q -- '-v /var/run/docker.sock'; then
     echo "  ✗ Default isolated child unexpectedly receives the Docker socket"
     touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"

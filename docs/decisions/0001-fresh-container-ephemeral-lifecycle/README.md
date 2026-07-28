@@ -19,8 +19,9 @@ environment was not.
 `gha` ephemeral mode uses two container roles:
 
 1. A long-lived **controller** holds the renewable GitHub registration
-   credential and host Docker socket. It never registers as a runner and never
-   executes workflow code.
+   credential and host Docker socket. It mints a short-lived, one-shot
+   registration token per child without forwarding the renewable credential or
+   token command. It never registers as a runner or executes workflow code.
 2. For every generation, the controller removes any stale exact-name child and
    starts the immutable runner image through `docker run --rm`. The child
    registers with `--ephemeral`, executes at most one job, exits, and is deleted

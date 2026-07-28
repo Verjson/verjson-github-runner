@@ -72,6 +72,10 @@ supervise_ephemeral() {
     # another job. The exact name is derived from the configured runner name.
     docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
 
+    # Mint a short-lived, one-shot registration token in the controller. Never
+    # forward the renewable PAT or token command into the untrusted job child.
+    parse_github_url
+    resolve_token
     child_args=(
       run --rm
       --name "${EPHEMERAL_CHILD_NAME}"
@@ -83,10 +87,8 @@ supervise_ephemeral() {
       -e "RUNNER_WORKDIR=${RUNNER_WORKDIR:-_work}"
       -e "RUNNER_EPHEMERAL=1"
       -e "RUNNER_FRESH_CONTAINER=1"
+      -e "RUNNER_TOKEN=${RUNNER_TOKEN}"
     )
-    append_child_env GITHUB_PAT
-    append_child_env RUNNER_TOKEN_CMD
-    append_child_env RUNNER_REMOVE_TOKEN_CMD
     append_child_env HTTPS_PROXY
     append_child_env HTTP_PROXY
     append_child_env NO_PROXY
@@ -103,6 +105,7 @@ supervise_ephemeral() {
     # traps promptly. A foreground external command defers the trap until the
     # job exits, which would leave a live child after controller shutdown.
     docker "${child_args[@]}" &
+    unset RUNNER_TOKEN
     child_client_pid=$!
     if ! wait "${child_client_pid}"; then
       echo "Ephemeral job container exited unsuccessfully; recreating a clean container after backoff." >&2
@@ -286,6 +289,8 @@ main() {
 
   ./config.sh \
     "${config_args[@]}"
+  unset RUNNER_TOKEN GITHUB_PAT RUNNER_TOKEN_CMD RUNNER_REMOVE_TOKEN_CMD
+  config_args=()
 
   # run.sh in the background + wait so the trap can fire on stop
   ./run.sh & wait $!
