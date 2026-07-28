@@ -1,6 +1,10 @@
 package dockerx
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 func TestParseJob(t *testing.T) {
 	cases := []struct {
@@ -35,5 +39,32 @@ func TestContainerName(t *testing.T) {
 	s := RunSpec{Name: "rust-1"}
 	if s.Container() != "gha-rust-1" {
 		t.Errorf("Container() = %q", s.Container())
+	}
+}
+
+func TestEphemeralRunUsesSupervisorAndKeepsSocketOutOfJobByDefault(t *testing.T) {
+	args := runArgs(RunSpec{
+		Name: "isolated-1", Image: "gha-runner:node", URL: "https://github.com/Verjson",
+		Token: "token", Labels: "self-hosted,isolated", Group: "isolated", Workdir: "_work",
+		Ephemeral: true,
+	})
+	joined := strings.Join(args, " ")
+	if !slices.Contains(args, "RUNNER_IMAGE=gha-runner:node") ||
+		!slices.Contains(args, "RUNNER_EPHEMERAL=1") ||
+		!slices.Contains(args, "gha.mode=ephemeral-supervisor") ||
+		args[len(args)-1] != "supervise" {
+		t.Fatalf("ephemeral args do not launch the supervisor contract: %v", joined)
+	}
+	if slices.Contains(args, "RUNNER_CHILD_MOUNT_SOCK=1") {
+		t.Fatalf("job child unexpectedly receives the Docker socket: %v", joined)
+	}
+}
+
+func TestEphemeralRunCanExplicitlyPassSocketToTrustedJob(t *testing.T) {
+	args := runArgs(RunSpec{
+		Name: "trusted-docker", Image: "gha-runner:base", Ephemeral: true, MountSock: true,
+	})
+	if !slices.Contains(args, "RUNNER_CHILD_MOUNT_SOCK=1") {
+		t.Fatalf("explicit trusted socket selection was not passed to supervisor: %v", args)
 	}
 }

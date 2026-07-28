@@ -23,7 +23,9 @@ env:
 
 jobs:
   base:
-    runs-on: [self-hosted, docker]
+    # This repository is public. Even trusted main/tag publication stays off the
+    # persistent organization runner group so public access can be denied there.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
@@ -72,7 +74,7 @@ jobs:
 
   kinds:
     needs: base
-    runs-on: [self-hosted, docker]
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Run entrypoint unit test suite
         run: bash tests/entrypoint_test.sh
+      - name: Prove ephemeral jobs receive fresh writable layers
+        run: bash tests/ephemeral_supervisor_integration.sh
 
   go-tests:
     runs-on: ubuntu-latest
@@ -23,6 +25,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '>=1.22'
+          go-version-file: app/go.mod
       - name: Run Go unit tests
         run: cd app && go test ./...

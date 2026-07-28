@@ -40,6 +40,19 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local needle="$1"
+  local haystack="$2"
+  local msg="$3"
+  if [[ "$haystack" != *"${needle}"* ]]; then
+    echo "  ✓ ${msg}"
+    touch "${TMP_DIR}/passed_$(date +%s%N)_$RANDOM"
+  else
+    echo "  ✗ ${msg} (unexpected substring '${needle}' in '${haystack}')"
+    touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"
+  fi
+}
+
 assert_file_exists() {
   local path="$1"
   local msg="$2"
@@ -276,13 +289,18 @@ EOF
   cat << 'EOF' > "${TEST_RUNNER_DIR}/run.sh"
 #!/usr/bin/env bash
 echo "run.sh executed" >> run_exec.log
+if env | grep -Eq '^(RUNNER_TOKEN|GITHUB_PAT|RUNNER_TOKEN_CMD|RUNNER_REMOVE_TOKEN_CMD)='; then
+  touch credential_exposed
+fi
 EOF
   chmod +x "${TEST_RUNNER_DIR}/config.sh" "${TEST_RUNNER_DIR}/run.sh"
 
   export GITHUB_URL="https://github.com/my-org/my-repo"
+  unset GITHUB_PAT RUNNER_TOKEN_CMD RUNNER_REMOVE_TOKEN_CMD || true
   export RUNNER_TOKEN="mock_token"
   export RUNNER_DIR="${TEST_RUNNER_DIR}"
   export RUNNER_EPHEMERAL=1
+  export RUNNER_FRESH_CONTAINER=1
 
   source "${REPO_ROOT}/entrypoint.sh"
   main &
@@ -293,6 +311,7 @@ EOF
 
   assert_contains "--ephemeral" "$(< "${TEST_RUNNER_DIR}/config_args.log")" "Passes --ephemeral flag when RUNNER_EPHEMERAL is set"
   assert_contains "run.sh executed" "$(< "${TEST_RUNNER_DIR}/run_exec.log")" "Launches run.sh in working directory"
+  assert_file_absent "${TEST_RUNNER_DIR}/credential_exposed" "Discards registration credentials before workflow execution"
 )
 
 # -----------------------------------------------------------------------------
@@ -529,6 +548,198 @@ EOF
   assert_file_absent "${standalone_dir}/token_resolved" "Does not resolve a registration token"
   assert_file_absent "${standalone_dir}/config_called" "Does not invoke config.sh"
   assert_contains "CI runner admission passed." "${output}" "Reports successful standalone admission"
+)
+
+# -----------------------------------------------------------------------------
+# Test 21: RUNNER_EPHEMERAL is parsed as a real boolean
+# -----------------------------------------------------------------------------
+echo "Test 21: RUNNER_EPHEMERAL boolean parsing"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  for value in 1 true TRUE yes on; do
+    RUNNER_EPHEMERAL="${value}"
+    normalize_ephemeral_mode
+    assert_eq "1" "${RUNNER_EPHEMERAL_ENABLED}" "Accepts true value ${value}"
+  done
+  for value in '' 0 false FALSE no off; do
+    RUNNER_EPHEMERAL="${value}"
+    normalize_ephemeral_mode
+    assert_eq "0" "${RUNNER_EPHEMERAL_ENABLED}" "Accepts false value '${value}'"
+  done
+  RUNNER_EPHEMERAL="sometimes"
+  set +e
+  output="$(normalize_ephemeral_mode 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects an ambiguous ephemeral value"
+  assert_contains "must be one of" "${output}" "Explains the accepted boolean values"
+)
+
+# -----------------------------------------------------------------------------
+# Test 22: supervisor creates a fresh --rm child for every generation
+# -----------------------------------------------------------------------------
+echo "Test 22: direct ephemeral mode fails closed without fresh-container attestation"
+(
+  TEST_RUNNER_DIR="${TMP_DIR}/unsafe_ephemeral_runner"
+  mkdir -p "${TEST_RUNNER_DIR}"
+
+  cat << 'EOF' > "${TEST_RUNNER_DIR}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  chmod +x "${TEST_RUNNER_DIR}/config.sh"
+
+  export GITHUB_URL="https://github.com/Verjson/test"
+  export RUNNER_DIR="${TEST_RUNNER_DIR}"
+  export RUNNER_EPHEMERAL=1
+  export RUNNER_TOKEN_CMD="touch '${TEST_RUNNER_DIR}/token_resolved'; echo unexpected"
+  unset RUNNER_FRESH_CONTAINER GITHUB_PAT RUNNER_TOKEN RUNNER_REMOVE_TOKEN_CMD || true
+
+  set +e
+  output="$("${REPO_ROOT}/entrypoint.sh" 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects direct ephemeral mode without a fresh disposable container"
+  assert_contains "RUNNER_EPHEMERAL requires a fresh disposable container" "${output}" "Explains the required isolation contract"
+  assert_file_absent "${TEST_RUNNER_DIR}/token_resolved" "Fails before resolving a registration token"
+  assert_file_absent "${TEST_RUNNER_DIR}/config_called" "Fails before runner registration"
+)
+
+# -----------------------------------------------------------------------------
+# Test 23: supervisor creates a fresh --rm child for every generation
+# -----------------------------------------------------------------------------
+echo "Test 23: ephemeral supervisor child lifecycle"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker_log="${TMP_DIR}/supervisor_docker.log"
+  token_log="${TMP_DIR}/supervisor_token.log"
+  : > "${docker_log}"
+  : > "${token_log}"
+  docker() {
+    printf '%s\n' "$*" >> "${docker_log}"
+    if [[ "$*" == container\ inspect* ]]; then
+      return 1
+    fi
+    if [[ "$*" == run\ * ]]; then
+      IFS= read -r child_token
+      printf '%s\n' "${child_token}" >> "${token_log}"
+    fi
+    return 0
+  }
+  mint_count=0
+  resolve_token() {
+    mint_count=$((mint_count + 1))
+    RUNNER_TOKEN="job-token-${mint_count}"
+  }
+  sleep() { :; }
+
+  GITHUB_URL="https://github.com/Verjson/test"
+  GITHUB_PAT="dummy"
+  RUNNER_NAME="isolated-1"
+  RUNNER_LABELS="self-hosted,isolated"
+  RUNNER_GROUP="isolated"
+  RUNNER_WORKDIR="_work"
+  RUNNER_IMAGE="gha-runner:test"
+  RUNNER_EPHEMERAL=true
+  RUNNER_EPHEMERAL_MAX_JOBS=2
+
+  supervise_ephemeral >/dev/null
+  run_count="$(grep -c '^run --rm ' "${docker_log}")"
+  remove_count="$(grep -c '^rm -f gha-isolated-1-job$' "${docker_log}")"
+  assert_eq "2" "${run_count}" "Runs two distinct disposable child generations"
+  assert_eq "4" "${remove_count}" "Sweeps the exact child before and after every generation"
+  assert_contains "RUNNER_EPHEMERAL=1" "$(< "${docker_log}")" "Marks every child runner one-job ephemeral"
+  assert_contains "RUNNER_FRESH_CONTAINER=1" "$(< "${docker_log}")" "Marks the supervisor-created child as a fresh layer"
+  assert_contains "job-token-1" "$(< "${token_log}")" "Streams a one-shot token to the first child"
+  assert_contains "job-token-2" "$(< "${token_log}")" "Streams a distinct one-shot token to the next child"
+  assert_not_contains "job-token-" "$(< "${docker_log}")" "Keeps one-shot tokens out of Docker argv and inspect metadata"
+  assert_contains "RUNNER_TOKEN_STDIN=1" "$(< "${docker_log}")" "Uses the non-metadata stdin token channel"
+  assert_not_contains "GITHUB_PAT=" "$(< "${docker_log}")" "Does not expose the renewable PAT to job children"
+  assert_not_contains "RUNNER_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose the token-mint command to job children"
+  assert_not_contains "RUNNER_REMOVE_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose removal credentials to job children"
+  if grep '^run --rm ' "${docker_log}" | grep -q -- '-v /var/run/docker.sock'; then
+    echo "  ✗ Default isolated child unexpectedly receives the Docker socket"
+    touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"
+  else
+    echo "  ✓ Default isolated child receives no Docker socket"
+    touch "${TMP_DIR}/passed_$(date +%s%N)_$RANDOM"
+  fi
+)
+
+# -----------------------------------------------------------------------------
+# Test 24: isolated GCP contract is admitted and preserved
+# -----------------------------------------------------------------------------
+echo "Test 24: isolated GCP launch contract"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker_log="${TMP_DIR}/isolated_docker.log"
+  : > "${docker_log}"
+  docker() {
+    printf '%s\n' "$*" >> "${docker_log}"
+    [[ "$*" == container\ inspect* ]] && return 1
+    [[ "$*" == run\ * ]] && IFS= read -r _
+    return 0
+  }
+  sleep() { :; }
+
+  GITHUB_URL="https://github.com/Verjson"
+  RUNNER_TOKEN_CMD="printf one-shot"
+  RUNNER_NAME="isolated-gcp-1"
+  RUNNER_LABELS="self-hosted,isolated,linux,x64,untrusted-pr,ephemeral,no-host-docker"
+  RUNNER_GROUP="isolated-pr"
+  RUNNER_IMAGE="ghcr.io/verjson/gha-runner@sha256:$(printf 'a%.0s' {1..64})"
+  RUNNER_CHILD_NETWORK="gha-isolated-deny-metadata"
+  RUNNER_METADATA_DENY_ATTEST_CMD=":"
+  RUNNER_EPHEMERAL=1
+  RUNNER_EPHEMERAL_MAX_JOBS=1
+
+  output="$(supervise_ephemeral)"
+  assert_contains "--network gha-isolated-deny-metadata" "$(< "${docker_log}")" "Uses the admitted metadata-denying network"
+  assert_contains "--add-host metadata.google.internal:127.0.0.1" "$(< "${docker_log}")" "Overrides the metadata hostname in the child only"
+  assert_not_contains "/var/run/docker.sock" "$(< "${docker_log}")" "Does not mount the host Docker socket"
+  assert_not_contains " -v " "$(< "${docker_log}")" "Does not mount shared writable host paths"
+  assert_contains "ISOLATED_ADMISSION" "${output}" "Emits a secret-free admission receipt"
+  assert_contains "ISOLATED_TEARDOWN" "${output}" "Emits a verified teardown receipt"
+
+  RUNNER_GROUP="Default"
+  set +e
+  output="$(validate_isolated_contract 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed for the Default runner group"
+)
+
+# -----------------------------------------------------------------------------
+# Test 25: supervisor rejects one-shot credentials and cleans up on shutdown
+# -----------------------------------------------------------------------------
+echo "Test 25: ephemeral supervisor credentials and shutdown"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  GITHUB_URL="https://github.com/Verjson/test"
+  RUNNER_NAME="isolated-1"
+  RUNNER_IMAGE="gha-runner:test"
+  RUNNER_EPHEMERAL=1
+  RUNNER_TOKEN="one-shot"
+  unset GITHUB_PAT RUNNER_TOKEN_CMD || true
+  set +e
+  output="$(supervise_ephemeral 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a static token that cannot register the next generation"
+  assert_contains "requires GITHUB_PAT or RUNNER_TOKEN_CMD" "${output}" "Requires a renewable credential source"
+
+  cleanup_log="${TMP_DIR}/supervisor_cleanup.log"
+  docker() {
+    printf '%s\n' "$*" >> "${cleanup_log}"
+    [[ "$*" == container\ inspect* ]] && return 1
+    return 0
+  }
+  EPHEMERAL_CHILD_NAME="gha-isolated-1-job"
+  output="$(stop_ephemeral_child)"
+  assert_contains "stop --time 10 gha-isolated-1-job" "$(< "${cleanup_log}")" "Stops the active child on shutdown"
+  assert_contains "rm -f gha-isolated-1-job" "$(< "${cleanup_log}")" "Removes the child after shutdown"
+  assert_contains "EPHEMERAL_TEARDOWN" "${output}" "Emits a verified signal teardown receipt"
 )
 
 echo "-----------------------------------------------------------------------------"
