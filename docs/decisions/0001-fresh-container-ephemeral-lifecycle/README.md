@@ -42,7 +42,8 @@ container is never treated as fresh isolation.
   opt-in.
 - A Docker integration fixture writes a marker into its root filesystem and
   fails if it already exists. The supervisor runs the same image twice; both
-  generations pass and no child remains afterward.
+  generations pass. It then receives SIGTERM while attached to a blocking child
+  and must stop/remove that child before exiting.
 
 ## Consequences
 

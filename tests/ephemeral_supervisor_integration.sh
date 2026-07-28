@@ -33,4 +33,35 @@ if docker container inspect gha-layer-test-job >/dev/null 2>&1; then
   echo "ephemeral child still exists after the supervisor returned" >&2
   exit 1
 fi
-echo "Ephemeral supervisor integration passed: two jobs, two fresh writable layers."
+
+# Deliver a real signal while docker run is attached to a live job. The
+# supervisor trap must stop and remove the child promptly.
+export RUNNER_NAME="shutdown-test"
+export RUNNER_EPHEMERAL_MAX_JOBS=0
+(
+  # shellcheck source=../entrypoint.sh
+  source "${root}/entrypoint.sh"
+  supervise_ephemeral
+) >/tmp/gha-ephemeral-shutdown-test.log 2>&1 &
+supervisor_pid=$!
+for _ in $(seq 1 30); do
+  if docker container inspect gha-shutdown-test-job >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+docker container inspect gha-shutdown-test-job >/dev/null
+kill -TERM "${supervisor_pid}"
+wait "${supervisor_pid}"
+for _ in $(seq 1 10); do
+  if ! docker container inspect gha-shutdown-test-job >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if docker container inspect gha-shutdown-test-job >/dev/null 2>&1; then
+  echo "signalled supervisor left its active child running" >&2
+  exit 1
+fi
+
+echo "Ephemeral supervisor integration passed: fresh layers and signal cleanup."

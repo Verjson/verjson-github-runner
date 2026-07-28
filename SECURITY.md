@@ -22,9 +22,10 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   and loses its writable layer before another child is created.
 * **Effect**: A file written anywhere in job container N is absent from job
   container N+1. Unit tests cover boolean parsing, renewable-token admission,
-  stale-child cleanup, shutdown, and socket exclusion. A Docker integration test
-  runs two generations whose image fails if a prior generation's root marker is
-  present.
+  stale-child cleanup, shutdown, and socket exclusion. Docker integration tests
+  run two generations whose image fails if a prior generation's root marker is
+  present, then signal a supervisor during a blocking job and assert the active
+  child is removed.
 * **Fail closed**: `RUNNER_EPHEMERAL=0` and other documented false values remain
   persistent. Invalid values fail startup. A direct ephemeral runner requires
   `RUNNER_FRESH_CONTAINER=1` from an external one-job orchestrator; setting

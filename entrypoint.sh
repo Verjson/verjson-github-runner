@@ -99,7 +99,12 @@ supervise_ephemeral() {
     child_args+=("${RUNNER_IMAGE}")
 
     echo "Starting fresh ephemeral job container ${EPHEMERAL_CHILD_NAME} (generation $((completed + 1)))..."
-    if ! docker "${child_args[@]}"; then
+    # Wait on a background Docker client so Bash can execute SIGINT/SIGTERM
+    # traps promptly. A foreground external command defers the trap until the
+    # job exits, which would leave a live child after controller shutdown.
+    docker "${child_args[@]}" &
+    child_client_pid=$!
+    if ! wait "${child_client_pid}"; then
       echo "Ephemeral job container exited unsuccessfully; recreating a clean container after backoff." >&2
       sleep 5
     fi

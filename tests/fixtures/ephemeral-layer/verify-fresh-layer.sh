@@ -6,3 +6,6 @@ if [ -e /job-generation-marker ]; then
 fi
 touch /job-generation-marker
 echo "fresh writable layer"
+if [ "${RUNNER_NAME:-}" = "shutdown-test" ]; then
+  sleep 300
+fi
