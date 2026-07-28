@@ -1,6 +1,45 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "local>Verjson/renovate-config"
+  "description": "Repository-local copy of the shared verJSON Renovate policy because the hosted Renovate app cannot resolve the private organization preset from this public repository.",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits"],
+  "labels": ["dependencies", "update/{{updateType}}"],
+  "rangeStrategy": "bump",
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "platformAutomerge": false,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "description": "Internal @verjson/* runtime bumps: auto-merge and republish (fix) so the umbrella propagates.",
+      "matchPackageNames": ["@verjson/**"],
+      "matchDepTypes": ["dependencies"],
+      "groupName": "verjson internal packages",
+      "semanticCommitType": "fix",
+      "minimumReleaseAge": "0 days",
+      "automerge": true
+    },
+    {
+      "description": "Internal @verjson/* dev/peer bumps: auto-merge without a release.",
+      "matchPackageNames": ["@verjson/**"],
+      "matchDepTypes": ["devDependencies", "peerDependencies"],
+      "groupName": "verjson internal packages (dev)",
+      "semanticCommitType": "chore",
+      "minimumReleaseAge": "0 days",
+      "automerge": true
+    },
+    {
+      "description": "Auto-merge non-major external updates on green CI (after the stability delay).",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Hold major updates for a human — keep them on the Dependency Dashboard, no PR until approved.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    }
   ]
 }

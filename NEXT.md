@@ -1,5 +1,10 @@
 # Next
 
+## 2026-07-28
+
+- Preserve the shared dependency-update policy locally so Renovate can operate
+  without resolving an inaccessible private organization preset.
+
 ## 2026-07-27
 
 - Correct the cloud-runner example to use provider-neutral `--runner-image` with
