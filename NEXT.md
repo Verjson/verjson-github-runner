@@ -1,5 +1,10 @@
 # Next
 
+## 2026-07-28
+
+- Replace the workstation-local security policy URL with a portable
+  repository-relative link.
+
 ## 2026-07-27
 
 - Correct the cloud-runner example to use provider-neutral `--runner-image` with
