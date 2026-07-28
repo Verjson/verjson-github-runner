@@ -15,6 +15,8 @@ set -euo pipefail
 #   RUNNER_EPHEMERAL — optional boolean; true runs one job in this container
 #   RUNNER_IMAGE     — supervisor mode only; immutable image used for fresh job containers
 #   RUNNER_CHILD_MOUNT_SOCK — supervisor mode only; explicitly mount Docker into job containers
+#   RUNNER_CHILD_NETWORK — supervisor mode only; metadata-denying Docker network for untrusted jobs
+#   RUNNER_METADATA_DENY_ATTEST_CMD — command that attests child metadata denial
 #   RUNNER_EPHEMERAL_MAX_JOBS — supervisor test/canary bound; 0 means supervise forever
 
 normalize_ephemeral_mode() {
@@ -39,8 +41,56 @@ append_child_env() {
 stop_ephemeral_child() {
   if [[ -n "${EPHEMERAL_CHILD_NAME:-}" ]]; then
     docker stop --time 10 "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
-    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
+    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || return 1
+    if docker container inspect "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1; then
+      echo "Ephemeral child teardown failed: ${EPHEMERAL_CHILD_NAME} still exists." >&2
+      return 1
+    fi
+    echo "EPHEMERAL_TEARDOWN child=${EPHEMERAL_CHILD_NAME} removed=true"
   fi
+}
+
+labels_include() {
+  local required="${1,,}" label
+  local labels=()
+  IFS=',' read -r -a labels <<< "${2}"
+  for label in "${labels[@]}"; do
+    label="${label#"${label%%[![:space:]]*}"}"
+    label="${label%"${label##*[![:space:]]}"}"
+    [[ "${label,,}" == "${required}" ]] && return 0
+  done
+  return 1
+}
+
+validate_isolated_contract() {
+  local required
+  labels_include untrusted-pr "${RUNNER_LABELS:-}" || return 0
+  for required in self-hosted isolated linux x64 untrusted-pr ephemeral no-host-docker; do
+    labels_include "${required}" "${RUNNER_LABELS}" || {
+      echo "Isolated runner contract requires label '${required}'." >&2
+      return 1
+    }
+  done
+  [[ -n "${RUNNER_GROUP:-}" && "${RUNNER_GROUP,,}" != default ]] || {
+    echo "Isolated runner contract requires a non-Default RUNNER_GROUP." >&2
+    return 1
+  }
+  [[ "${RUNNER_IMAGE:-}" =~ @sha256:[0-9a-f]{64}$ ]] || {
+    echo "Isolated runner contract requires RUNNER_IMAGE pinned by immutable sha256 digest." >&2
+    return 1
+  }
+  [[ "${RUNNER_CHILD_MOUNT_SOCK:-0}" == 0 ]] || {
+    echo "Isolated runner contract forbids the host Docker socket." >&2
+    return 1
+  }
+  [[ -n "${RUNNER_CHILD_NETWORK:-}" && ! "${RUNNER_CHILD_NETWORK}" =~ ^(bridge|host|none|default)$ ]] || {
+    echo "Isolated runner contract requires a dedicated metadata-denying RUNNER_CHILD_NETWORK." >&2
+    return 1
+  }
+  [[ -n "${RUNNER_METADATA_DENY_ATTEST_CMD:-}" ]] || {
+    echo "Isolated runner contract requires RUNNER_METADATA_DENY_ATTEST_CMD." >&2
+    return 1
+  }
 }
 
 supervise_ephemeral() {
@@ -57,6 +107,7 @@ supervise_ephemeral() {
     echo "Supervisor mode requires RUNNER_EPHEMERAL=true." >&2
     return 1
   fi
+  validate_isolated_contract || return 1
 
   local max_jobs="${RUNNER_EPHEMERAL_MAX_JOBS:-0}"
   if [[ ! "${max_jobs}" =~ ^[0-9]+$ ]]; then
@@ -76,8 +127,15 @@ supervise_ephemeral() {
     # forward the renewable PAT or token command into the untrusted job child.
     parse_github_url
     resolve_token
+    if labels_include untrusted-pr "${RUNNER_LABELS:-}"; then
+      eval "${RUNNER_METADATA_DENY_ATTEST_CMD}" || {
+        echo "Isolated runner metadata-denial admission failed." >&2
+        return 1
+      }
+      echo "ISOLATED_ADMISSION image=${RUNNER_IMAGE} group=${RUNNER_GROUP} labels=${RUNNER_LABELS} metadata_denied=true socket_absent=true shared_writes=false"
+    fi
     child_args=(
-      run --rm
+      run --rm -i
       --name "${EPHEMERAL_CHILD_NAME}"
       --label "gha.ephemeral-job=true"
       -e "GITHUB_URL=${GITHUB_URL}"
@@ -87,8 +145,11 @@ supervise_ephemeral() {
       -e "RUNNER_WORKDIR=${RUNNER_WORKDIR:-_work}"
       -e "RUNNER_EPHEMERAL=1"
       -e "RUNNER_FRESH_CONTAINER=1"
-      -e "RUNNER_TOKEN=${RUNNER_TOKEN}"
+      -e "RUNNER_TOKEN_STDIN=1"
     )
+    if [[ -n "${RUNNER_CHILD_NETWORK:-}" ]]; then
+      child_args+=(--network "${RUNNER_CHILD_NETWORK}" --add-host "metadata.google.internal:127.0.0.1")
+    fi
     append_child_env HTTPS_PROXY
     append_child_env HTTP_PROXY
     append_child_env NO_PROXY
@@ -104,13 +165,20 @@ supervise_ephemeral() {
     # Wait on a background Docker client so Bash can execute SIGINT/SIGTERM
     # traps promptly. A foreground external command defers the trap until the
     # job exits, which would leave a live child after controller shutdown.
-    docker "${child_args[@]}" &
+    printf '%s\n' "${RUNNER_TOKEN}" | docker "${child_args[@]}" &
     unset RUNNER_TOKEN
     child_client_pid=$!
     if ! wait "${child_client_pid}"; then
       echo "Ephemeral job container exited unsuccessfully; recreating a clean container after backoff." >&2
       sleep 5
     fi
+    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
+    if docker container inspect "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1; then
+      echo "Ephemeral child teardown admission failed: ${EPHEMERAL_CHILD_NAME} still exists." >&2
+      return 1
+    fi
+    labels_include untrusted-pr "${RUNNER_LABELS:-}" &&
+      echo "ISOLATED_TEARDOWN child=${EPHEMERAL_CHILD_NAME} generation=$((completed + 1)) removed=true"
     completed=$((completed + 1))
     if [[ "${max_jobs}" -gt 0 && "${completed}" -ge "${max_jobs}" ]]; then
       echo "Ephemeral supervisor reached its ${max_jobs}-job bound."
@@ -270,6 +338,12 @@ main() {
   fi
 
   parse_github_url
+  if [[ "${RUNNER_TOKEN_STDIN:-0}" == 1 ]]; then
+    if ! IFS= read -r RUNNER_TOKEN || [[ -z "${RUNNER_TOKEN}" ]]; then
+      echo "Missing one-shot registration token on stdin." >&2
+      return 1
+    fi
+  fi
   resolve_token
 
   trap cleanup SIGINT SIGTERM
