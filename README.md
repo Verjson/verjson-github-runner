@@ -313,7 +313,7 @@ to it, so you can ignore groups entirely unless you want the access control.
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in
   `docker-compose.yml`). This grants host root-equivalent access — trusted private
   repos only.
-- **Security & Hardening:** See [SECURITY.md](file:///d:/Development/verjson/verjson-github-runner/SECURITY.md) for full threat model details, ephemeral runner enforcement (`RUNNER_EPHEMERAL=1`), least-privilege token permissions, IMDS isolation, and incident response procedures.
+- **Security & Hardening:** See [SECURITY.md](SECURITY.md) for full threat model details, ephemeral runner enforcement (`RUNNER_EPHEMERAL=1`), least-privilege token permissions, IMDS isolation, and incident response procedures.
 - **Availability:** keep the host awake (disable sleep) or jobs queue while it's off.
 - **Update the runner:** bump `RUNNER_VERSION` in the `Dockerfile`, then
   `docker compose up -d --build`.
