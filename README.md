@@ -70,6 +70,20 @@ Deploy immutable digests rather than mutable tags:
 docker pull ghcr.io/verjson/gha-runner@sha256:<manifest-digest>
 ```
 
+Run the same admission without registration credentials before provisioning:
+
+```sh
+RUNNER_IMAGE=ghcr.io/verjson/gha-runner@sha256:<manifest-digest>
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+docker run --rm \
+  --group-add "$DOCKER_GID" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  "$RUNNER_IMAGE" ci
+```
+
+The standalone `ci` command exercises the complete capability matrix and exits
+without reading `GITHUB_URL`, resolving a token, or running `config.sh`.
+
 Attaching `ci` to an organization runner remains a rollout action. Use the digest receipt
 from the publish workflow, verify admission on the target host, and preserve the existing
 runner-group repository allowlist.
