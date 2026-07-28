@@ -46,13 +46,23 @@ Tequity. CI builds one shared artifact and pushes it to
 
 1. **Your own host** (home PC / VPS / mini PC) — the `gha` manager or `setup.sh`
    below. These build locally today; you can also just `docker pull` a published tag.
-2. **GCP, via the CLI** — `verjson cloud runner --image ghcr.io/verjson/gha-runner:base-<sha>`
-   provisions a self-healing Spot MIG whose VMs `docker run` this image with the host
-   socket mounted, minting registration tokens at boot from a GitHub App (no PAT on the
-   box). See [`verjson-cli-cloud`](https://github.com/Verjson/verjson-cli-cloud) (#58).
+2. **Cloud hosts, via the CLI** —
+   `verjson cloud runner <lane> --runner-image ghcr.io/verjson/gha-runner@sha256:<manifest-digest> --runner-group <dedicated-group>`
+   deploys the exact attested manifest with the host socket mounted. Container mode
+   requires an existing, explicitly named non-`Default` runner group with public
+   repositories disabled and access restricted to selected trusted private
+   repositories and workflows; the CLI does not create or widen that access.
+   - **GCP** uses self-healing Spot MIG VMs and one-job ephemeral containers. Each
+     container start mints a fresh registration token from the host's GitHub App
+     integration.
+   - **DigitalOcean** uses stable, non-ephemeral runner registrations on named
+     Droplets. The configured runner identity survives container and host restarts;
+     its initial one-shot registration token is delivered over the reviewed SSH
+     standard-input channel and is not persisted.
+   See [`verjson-cli-cloud#88`](https://github.com/Verjson/verjson-cli-cloud/issues/88).
 
-Host provisioning (your box, or GCP) is decoupled from the runner artifact (this image),
-so both paths stay in lockstep on one runner definition.
+Host provisioning (your box, GCP, or DigitalOcean) is decoupled from the runner
+artifact (this image), so every path can stay in lockstep on one runner definition.
 
 ### The `ci` runner contract
 
