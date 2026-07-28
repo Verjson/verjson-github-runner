@@ -130,6 +130,11 @@ cleanup() {
 }
 
 main() {
+  if [[ "${1:-}" == "ci" ]]; then
+    attest_ci_runner
+    return $?
+  fi
+
   : "${GITHUB_URL:?Set GITHUB_URL, e.g. https://github.com/your-org or https://github.com/you/repo}"
   cd "${RUNNER_DIR:-/home/runner/actions-runner}"
 

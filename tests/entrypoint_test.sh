@@ -477,6 +477,60 @@ EOF
   assert_file_exists "${non_ci_dir}/run_called" "Starts labels outside the ci contract"
 )
 
+# -----------------------------------------------------------------------------
+# Test 20: standalone ci dispatches directly to admission
+# -----------------------------------------------------------------------------
+echo "Test 20: standalone ci dispatches directly to admission"
+(
+  standalone_dir="${TMP_DIR}/standalone_ci"
+  command_log="${standalone_dir}/commands.log"
+  mkdir -p "${standalone_dir}"
+  : > "${command_log}"
+  export command_log
+
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() { echo "docker $*" >> "${command_log}"; }
+  node() {
+    echo "node $*" >> "${command_log}"
+    echo "v24.18.0"
+  }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() { echo "jq $*" >> "${command_log}"; }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() { echo "bash $*" >> "${command_log}"; }
+  curl() { echo "curl $*" >> "${command_log}"; }
+  grep() { echo "grep $*" >> "${command_log}"; }
+  sed() { echo "sed $*" >> "${command_log}"; }
+  awk() { echo "awk $*" >> "${command_log}"; }
+  find() { echo "find $*" >> "${command_log}"; }
+  base64() { echo "base64 $*" >> "${command_log}"; }
+  tar() { echo "tar $*" >> "${command_log}"; }
+  gzip() { echo "gzip $*" >> "${command_log}"; }
+  export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip
+
+  cat << EOF > "${standalone_dir}/config.sh"
+#!/usr/bin/env bash
+touch "${standalone_dir}/config_called"
+EOF
+  chmod +x "${standalone_dir}/config.sh"
+
+  unset GITHUB_URL GITHUB_PAT RUNNER_TOKEN || true
+  export RUNNER_DIR="${standalone_dir}"
+  export RUNNER_TOKEN_CMD="touch '${standalone_dir}/token_resolved'; echo unexpected"
+
+  set +e
+  output="$("${REPO_ROOT}/entrypoint.sh" ci 2>&1)"
+  status=$?
+  set -e
+
+  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version'
+  assert_eq "0" "${status}" "Standalone ci exits successfully without registration inputs"
+  assert_eq "${expected_commands}" "$(< "${command_log}")" "Dispatches directly to the complete ci attestation"
+  assert_file_absent "${standalone_dir}/token_resolved" "Does not resolve a registration token"
+  assert_file_absent "${standalone_dir}/config_called" "Does not invoke config.sh"
+  assert_contains "CI runner admission passed." "${output}" "Reports successful standalone admission"
+)
+
 echo "-----------------------------------------------------------------------------"
 passed_count=$(find "${TMP_DIR}" -name 'passed_*' | wc -l | tr -d ' ')
 failed_count=$(find "${TMP_DIR}" -name 'failed_*' | wc -l | tr -d ' ')
