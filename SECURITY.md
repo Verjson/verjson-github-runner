@@ -16,8 +16,32 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 ## 2. Hardening Controls
 
 ### Ephemeral / JIT Runners (`RUNNER_EPHEMERAL=1`)
-* **Control**: Set `RUNNER_EPHEMERAL=1` in container environment variables or `--ephemeral` when calling `./config.sh`.
-* **Effect**: The runner processes exactly **one job** and immediately de-registers and shuts down upon completion. Any temporary state, workspace files, or memory tokens are completely destroyed, preventing cross-job persistence.
+* **Control**: Supported launchers parse `RUNNER_EPHEMERAL` explicitly. `1` and
+  `true` select one-job registration; `0`, `false`, and empty select persistent
+  registration; every other value fails before token minting or registration.
+  Ephemeral launchers use Docker `--rm` without a restart policy.
+* **Effect**: The runner accepts at most **one job**. On completion, runner crash,
+  or operator shutdown, the entrypoint attempts de-registration and the Docker
+  daemon removes the container and its writable layer. Starting capacity again
+  creates a new container identity. Integration tests write a marker outside the
+  checked-out repository and prove that the next container cannot see it.
+* **Supervisor boundary**: `./config.sh --ephemeral` or the environment variable
+  alone only limits a GitHub registration; it does not erase a reused container.
+  A long-lived external reconciler may persist, but it must create a new `--rm`
+  job container for every registration. The `gha` manager and setup scripts
+  enforce this split. Compose users must invoke
+  `docker compose --profile ephemeral run --rm runner-ephemeral`.
+* **Failure behavior**: Ephemeral containers have no Docker restart policy, so a
+  runner crash cannot reconfigure inside the same writable layer or settle into a
+  restart loop. Re-registration requires a new invocation and a freshly minted
+  registration token.
+
+### Persistent Runners (lower isolation)
+* **Control**: `RUNNER_EPHEMERAL=0`, `false`, or empty preserves
+  `--restart unless-stopped` for hosts that deliberately need stable capacity.
+* **Boundary**: Container identity, workspace, caches, and writable-layer state can
+  survive restarts. Persistent runners must not execute untrusted pull-request
+  code and must be restricted to reviewed private workflows.
 
 ### Least-Privilege Workflow Permissions
 * **Control**: Specify explicit `permissions:` blocks in all workflow definitions:

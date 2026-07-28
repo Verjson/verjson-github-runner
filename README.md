@@ -161,6 +161,8 @@ required on the host.** Use `./bootstrap.sh --no-run` to set up without launchin
    - choose **which kinds** of runners (multi-select), and
    - **how many of each** (e.g. 2 × Rust, 3 × Node) — all on one screen,
    - set labels/group/ephemeral, confirm, and it builds + launches the containers.
+     Ephemeral containers accept at most one job, are removed on exit, and must be
+     launched again (or reconciled by an external provider) to restore capacity.
    - If your `gh` session lacks the scope (e.g. `admin:org`), it offers to run
      `gh auth refresh` for you.
 4. **`gha dashboard`** — a **btop-style live monitor** (aliases: `dash`, `top`): per-runner
@@ -228,8 +230,11 @@ All of these are collected from you at the prompts, so nothing is hardcoded. The
 **runner group** defaults to `Default` (works out of the box); only change it if
 you've created a custom group in the org first — see [Runner groups](#runner-groups-org-runners-only).
 
-Each name becomes its own container `gha-<name>` with `--restart unless-stopped`
-(so it also survives reboots while the Docker daemon is enabled).
+Persistent names become containers `gha-<name>` with `--restart unless-stopped`
+(so they survive reboots while the Docker daemon is enabled). Choosing ephemeral
+mode instead launches each name with `--rm` and no Docker restart policy. After its
+single job, the container and writable layer are gone; run the setup again for new
+capacity.
 
 ```bash
 docker ps --filter name=gha-           # see them
@@ -252,8 +257,11 @@ jobs:
 1. Edit `.env` (`GITHUB_URL`, `GITHUB_PAT`, `RUNNER_NAME`, `RUNNER_LABELS`).
    - Org runner → classic PAT with `admin:org`.
    - Repo runner → classic PAT with `repo`.
-2. `docker compose up -d --build` then `docker compose logs -f`.
-3. `docker compose down` stops and cleanly de-registers it.
+2. Persistent mode: `docker compose up -d --build runner`, then
+   `docker compose logs -f runner`.
+3. One-job mode: `docker compose --profile ephemeral run --rm --build runner-ephemeral`.
+   Every invocation creates a fresh container and writable layer.
+4. `docker compose down` stops and cleanly de-registers persistent mode.
 
 ## Runner groups (org runners only)
 
@@ -287,8 +295,8 @@ to it, so you can ignore groups entirely unless you want the access control.
 | `images/base.Dockerfile` | Base runner image (Ubuntu 24.04, non-root `runner`, shared `ci` tools). Every kind builds `FROM` it. |
 | `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
 | `.github/workflows/publish-images.yml` | CI: build + push attested multi-arch images and retain immutable digest receipts. |
-| `entrypoint.sh` | Admits the exact `ci` contract before credentials, mints/uses a registration token, runs, and de-registers on stop. |
-| `docker-compose.yml` | Single-runner alternative (`restart: unless-stopped`). |
+| `entrypoint.sh` | Admits the exact `ci` contract before credentials, explicitly parses ephemeral mode, mints/uses a registration token, and de-registers on completion, crash, or stop. |
+| `docker-compose.yml` | Separate persistent and one-job runner services. |
 | `.env` | Config + secrets for the compose path (git-ignored). |
 
 > The root `Dockerfile` is a pre-`images/` leftover kept only for backward compat — the
@@ -305,7 +313,11 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_TOKEN` — a one-shot token (expires ~1h; stop leaves an offline "ghost").
 - **Environment overrides** (`entrypoint.sh`):
   - `RUNNER_DIR` — optional working directory override containing `actions-runner` binaries (defaults to `/home/runner/actions-runner`).
-  - `RUNNER_EPHEMERAL` — if set to `1` or `true`, passes `--ephemeral` to `./config.sh` so the runner tears down after completing a single job.
+  - `RUNNER_EPHEMERAL` — `1`/`true` enables one-job registration;
+    `0`/`false`/empty disables it; any other value fails before registration.
+    Registration alone does not destroy a Docker writable layer. Use the `gha`
+    manager, setup scripts, Compose `run --rm`, or a provider supervisor that
+    creates a fresh `--rm` container with no restart policy for every job.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
     bypass startup admission.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
@@ -313,7 +325,9 @@ to it, so you can ignore groups entirely unless you want the access control.
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in
   `docker-compose.yml`). This grants host root-equivalent access — trusted private
   repos only.
-- **Security & Hardening:** See [SECURITY.md](file:///d:/Development/verjson/verjson-github-runner/SECURITY.md) for full threat model details, ephemeral runner enforcement (`RUNNER_EPHEMERAL=1`), least-privilege token permissions, IMDS isolation, and incident response procedures.
+- **Security & Hardening:** See [SECURITY.md](SECURITY.md) for the threat model,
+  tested one-job container lifecycle, persistent-mode boundary, least-privilege
+  token permissions, IMDS isolation, and incident response procedures.
 - **Availability:** keep the host awake (disable sleep) or jobs queue while it's off.
 - **Update the runner:** bump `RUNNER_VERSION` in the `Dockerfile`, then
   `docker compose up -d --build`.

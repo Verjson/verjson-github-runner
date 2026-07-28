@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 #
 # Interactive setup for one or more Dockerized GitHub Actions self-hosted runners.
-# Prompts for the details, builds the image, and launches each runner as an
-# auto-restarting background service (Docker `--restart unless-stopped`, so they
-# also come back after a reboot as long as the Docker daemon is enabled).
+# Prompts for the details, builds the image, and launches each runner as either
+# a persistent auto-restarting service or a one-job auto-removed container.
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -25,6 +24,20 @@ NAMES_INPUT="$(ask 'Runner name(s), comma-separated' 'ci-runner-01')"
 LABELS="$(ask 'Labels (comma-separated)' 'self-hosted,linux,x64,docker')"
 RUNNER_GROUP="$(ask 'Runner group (org runners only; Default for repo)' 'Default')"
 RUNNER_WORKDIR="$(ask 'Work folder' '_work')"
+EPHEMERAL="$(ask 'Ephemeral one-job container? (true/false)' 'false')"
+
+case "$EPHEMERAL" in
+  1|[Tt][Rr][Uu][Ee])
+    lifecycle_args=(--rm -e RUNNER_EPHEMERAL=1)
+    ;;
+  ""|0|[Ff][Aa][Ll][Ss][Ee])
+    lifecycle_args=(--restart unless-stopped)
+    ;;
+  *)
+    echo "Ephemeral mode must be one of: 1, true, 0, or false." >&2
+    exit 1
+    ;;
+esac
 
 bold "Building image ($IMAGE)..."
 docker build -t "$IMAGE" .
@@ -38,7 +51,7 @@ for raw in "${NAMES[@]}"; do
   docker rm -f "$container" >/dev/null 2>&1 || true
   docker run -d \
     --name "$container" \
-    --restart unless-stopped \
+    "${lifecycle_args[@]}" \
     -e GITHUB_URL="$GITHUB_URL" \
     -e GITHUB_PAT="$GITHUB_PAT" \
     -e RUNNER_NAME="$name" \

@@ -12,7 +12,27 @@ set -euo pipefail
 #   RUNNER_LABELS    — optional, comma-separated runner labels (defaults to self-hosted,linux,x64,docker)
 #   RUNNER_GROUP     — optional, org runner group name (defaults to Default)
 #   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
-#   RUNNER_EPHEMERAL — optional, if set to 1/true, passes --ephemeral to config.sh (single-job teardown)
+#   RUNNER_EPHEMERAL — optional, 1/true enables one-job registration; 0/false/empty disables it
+
+parse_runner_ephemeral() {
+  case "${RUNNER_EPHEMERAL:-}" in
+    1|[Tt][Rr][Uu][Ee])
+      RUNNER_EPHEMERAL_ENABLED=true
+      ;;
+    ""|0|[Ff][Aa][Ll][Ss][Ee])
+      RUNNER_EPHEMERAL_ENABLED=false
+      ;;
+    *)
+      echo "RUNNER_EPHEMERAL must be one of: 1, true, 0, false, or empty." >&2
+      return 1
+      ;;
+  esac
+}
+
+runner_ephemeral_enabled() {
+  parse_runner_ephemeral || return 2
+  [[ "${RUNNER_EPHEMERAL_ENABLED}" == "true" ]]
+}
 
 runner_labels_include_ci() {
   local label
@@ -126,7 +146,16 @@ cleanup() {
   else
     ./config.sh remove --local || true
   fi
-  exit 0
+}
+
+stop_runner() {
+  local status="$1"
+
+  if [[ -n "${runner_pid:-}" ]] && kill -0 "${runner_pid}" 2>/dev/null; then
+    kill -TERM "${runner_pid}" 2>/dev/null || true
+    wait "${runner_pid}" 2>/dev/null || true
+  fi
+  exit "${status}"
 }
 
 main() {
@@ -142,6 +171,11 @@ main() {
   RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
   RUNNER_GROUP="${RUNNER_GROUP:-Default}"
   RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
+  parse_runner_ephemeral
+  ephemeral_arg=()
+  if [[ "${RUNNER_EPHEMERAL_ENABLED}" == "true" ]]; then
+    ephemeral_arg=(--ephemeral)
+  fi
 
   # Advertising "ci" is a capability claim. Prove the complete contract before any
   # registration credential is minted or config.sh can make the runner schedulable.
@@ -158,7 +192,10 @@ main() {
   parse_github_url
   resolve_token
 
-  trap cleanup SIGINT SIGTERM
+  runner_pid=""
+  trap 'stop_runner 130' SIGINT
+  trap 'stop_runner 143' SIGTERM
+  trap cleanup EXIT
 
   ./config.sh \
     --url "${GITHUB_URL}" \
@@ -167,10 +204,19 @@ main() {
     --labels "${RUNNER_LABELS}" \
     --work "${RUNNER_WORKDIR}" \
     "${group_arg[@]}" \
-    --unattended --replace ${RUNNER_EPHEMERAL:+--ephemeral}
+    --unattended --replace \
+    "${ephemeral_arg[@]}"
 
-  # run.sh in the background + wait so the trap can fire on stop
-  ./run.sh & wait $!
+  # run.sh in the background + wait so stop signals reach the runner process and
+  # every terminal path (success, crash, or shutdown) attempts de-registration.
+  ./run.sh &
+  runner_pid=$!
+  set +e
+  wait "${runner_pid}"
+  runner_status=$?
+  set -e
+  runner_pid=""
+  return "${runner_status}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

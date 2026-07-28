@@ -1,7 +1,8 @@
 #!/usr/bin/env pwsh
 #
 # Interactive setup for one or more Dockerized GitHub Actions self-hosted runners.
-# Windows (PowerShell) equivalent of setup.sh. Requires Docker Desktop.
+# Windows (PowerShell) equivalent of setup.sh. Requires Docker Desktop and
+# launches either persistent or one-job auto-removed containers.
 #
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -27,6 +28,21 @@ $namesInput   = Read-Default "Runner name(s), comma-separated" "ci-runner-01"
 $labels       = Read-Default "Labels (comma-separated)" "self-hosted,linux,x64,docker"
 $runnerGroup  = Read-Default "Runner group (org runners only; Default for repo)" "Default"
 $runnerWork   = Read-Default "Work folder" "_work"
+$ephemeral    = Read-Default "Ephemeral one-job container? (true/false)" "false"
+
+switch -Regex ($ephemeral) {
+    '^(1|true)$' {
+        $lifecycleArgs = @("--rm", "-e", "RUNNER_EPHEMERAL=1")
+        break
+    }
+    '^(|0|false)$' {
+        $lifecycleArgs = @("--restart", "unless-stopped")
+        break
+    }
+    default {
+        throw "Ephemeral mode must be one of: 1, true, 0, or false."
+    }
+}
 
 Write-Host "Building image ($image)..." -ForegroundColor Cyan
 docker build -t $image .
@@ -38,16 +54,19 @@ foreach ($raw in $namesInput.Split(",")) {
     $container = "gha-$name"
     Write-Host "Starting runner '$name' (container: $container)" -ForegroundColor Cyan
     docker rm -f $container 2>$null | Out-Null
-    docker run -d `
-        --name $container `
-        --restart unless-stopped `
-        -e GITHUB_URL=$GITHUB_URL `
-        -e GITHUB_PAT=$GITHUB_PAT `
-        -e RUNNER_NAME=$name `
-        -e RUNNER_LABELS=$labels `
-        -e RUNNER_GROUP=$runnerGroup `
-        -e RUNNER_WORKDIR=$runnerWork `
-        $image | Out-Null
+    $dockerArgs = @(
+        "run", "-d",
+        "--name", $container
+    ) + $lifecycleArgs + @(
+        "-e", "GITHUB_URL=$GITHUB_URL",
+        "-e", "GITHUB_PAT=$GITHUB_PAT",
+        "-e", "RUNNER_NAME=$name",
+        "-e", "RUNNER_LABELS=$labels",
+        "-e", "RUNNER_GROUP=$runnerGroup",
+        "-e", "RUNNER_WORKDIR=$runnerWork",
+        $image
+    )
+    docker @dockerArgs | Out-Null
 }
 
 Write-Host "`nRunners are up:" -ForegroundColor Green

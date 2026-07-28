@@ -3,9 +3,19 @@ services:
     build: .
     container_name: gha-runner-home
     restart: unless-stopped
-    env_file: .env
+    env_file: ${RUNNER_ENV_FILE:-.env}
+    environment:
+      RUNNER_EPHEMERAL: "0"
     # Optional: let workflows use Docker on the host (docker build/run in CI).
     # WARNING: mounting the host socket gives the container root-equivalent
     # access to the host. Only enable for trusted, private repos.
     # volumes:
     #   - /var/run/docker.sock:/var/run/docker.sock
+
+  runner-ephemeral:
+    profiles: [ephemeral]
+    build: .
+    restart: "no"
+    env_file: ${RUNNER_ENV_FILE:-.env}
+    environment:
+      RUNNER_EPHEMERAL: "1"

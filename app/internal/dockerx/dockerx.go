@@ -60,16 +60,13 @@ type RunSpec struct {
 // Container is the container name for a spec.
 func (s RunSpec) Container() string { return Prefix + s.Name }
 
-// Run (re)creates and starts a runner container detached, returning the container id.
-func Run(s RunSpec) (string, error) {
-	_ = exec.Command("docker", "rm", "-f", s.Container()).Run() // replace if it exists
-
+func runArgs(s RunSpec) []string {
 	args := []string{
 		"run", "-d",
 		"--name", s.Container(),
-		"--restart", "unless-stopped",
 		"--label", "gha.managed=true",
 		"--label", "gha.kind=" + kindFromImage(s.Image),
+		"--label", fmt.Sprintf("gha.ephemeral=%t", s.Ephemeral),
 		"-e", "GITHUB_URL=" + s.URL,
 		"-e", "GITHUB_PAT=" + s.Token,
 		"-e", "RUNNER_NAME=" + s.Name,
@@ -78,7 +75,9 @@ func Run(s RunSpec) (string, error) {
 		"-e", "RUNNER_WORKDIR=" + s.Workdir,
 	}
 	if s.Ephemeral {
-		args = append(args, "-e", "RUNNER_EPHEMERAL=1")
+		args = append(args, "--rm", "-e", "RUNNER_EPHEMERAL=1")
+	} else {
+		args = append(args, "--restart", "unless-stopped")
 	}
 	if s.Proxy != "" {
 		// Set both upper- and lower-case variants; the runner, git, and curl differ on which they read.
@@ -93,8 +92,14 @@ func Run(s RunSpec) (string, error) {
 		args = append(args, "-v", "/var/run/docker.sock:/var/run/docker.sock")
 	}
 	args = append(args, s.Image)
+	return args
+}
 
-	out, err := exec.Command("docker", args...).CombinedOutput()
+// Run (re)creates and starts a runner container detached, returning the container id.
+func Run(s RunSpec) (string, error) {
+	_ = exec.Command("docker", "rm", "-f", s.Container()).Run() // replace if it exists
+
+	out, err := exec.Command("docker", runArgs(s)...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("docker run %s: %w: %s", s.Container(), err, strings.TrimSpace(string(out)))
 	}
@@ -216,9 +221,20 @@ func Remove(name string) error {
 	return exec.Command("docker", "rm", "-f", Prefix+name).Run()
 }
 
-// Restart restarts a runner container.
+// Restart restarts a persistent runner container. Ephemeral containers must be
+// removed and recreated so their writable layer is never reused.
 func Restart(name string) error {
-	return exec.Command("docker", "restart", Prefix+name).Run()
+	container := Prefix + name
+	out, err := exec.Command(
+		"docker", "inspect", "--format", "{{index .Config.Labels \"gha.ephemeral\"}}", container,
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w: %s", container, err, strings.TrimSpace(string(out)))
+	}
+	if strings.TrimSpace(string(out)) == "true" {
+		return fmt.Errorf("cannot restart ephemeral runner %s; remove it and launch a fresh container", name)
+	}
+	return exec.Command("docker", "restart", container).Run()
 }
 
 // kindFromImage extracts the tag suffix (rust/node/...) from gha-runner:<kind>.

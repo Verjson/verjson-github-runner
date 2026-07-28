@@ -69,7 +69,7 @@ func Run(login, token string) error {
 	opts := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Runner group").Description("Org runners only; leave 'Default' for repos.").Value(&group),
 		huh.NewInput().Title("Work folder").Value(&workdir),
-		huh.NewConfirm().Title("Ephemeral runners?").Description("Each handles one job then re-registers.").Value(&ephemeral),
+		huh.NewConfirm().Title("Ephemeral runners?").Description("Each container handles one job, is removed, and must be launched fresh again.").Value(&ephemeral),
 		huh.NewConfirm().Title("Mount host docker socket?").Description("Lets CI use Docker, but grants host-root. Trusted repos only.").Value(&mountSock),
 		huh.NewInput().Title("HTTPS proxy (optional)").
 			Description("For locked-down networks. Leave blank if outbound 443 is open.").
@@ -293,7 +293,7 @@ func printSummary(p Plan) {
 	fmt.Println(titleStyle.Render("Plan"))
 	fmt.Printf("  Target    %s  (%s)\n", p.Target.Slug(), targetKind(p.Target))
 	if p.Ephemeral {
-		fmt.Println("  Mode      ephemeral (one job each)")
+		fmt.Println("  Mode      ephemeral (one job, auto-removed; launch again for new capacity)")
 	}
 	if p.Proxy != "" {
 		fmt.Printf("  Proxy     %s\n", p.Proxy)
