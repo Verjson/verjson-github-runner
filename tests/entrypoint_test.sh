@@ -561,7 +561,38 @@ echo "Test 21: RUNNER_EPHEMERAL boolean parsing"
 # -----------------------------------------------------------------------------
 # Test 22: supervisor creates a fresh --rm child for every generation
 # -----------------------------------------------------------------------------
-echo "Test 22: ephemeral supervisor child lifecycle"
+echo "Test 22: direct ephemeral mode fails closed without fresh-container attestation"
+(
+  TEST_RUNNER_DIR="${TMP_DIR}/unsafe_ephemeral_runner"
+  mkdir -p "${TEST_RUNNER_DIR}"
+
+  cat << 'EOF' > "${TEST_RUNNER_DIR}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  chmod +x "${TEST_RUNNER_DIR}/config.sh"
+
+  export GITHUB_URL="https://github.com/Verjson/test"
+  export RUNNER_DIR="${TEST_RUNNER_DIR}"
+  export RUNNER_EPHEMERAL=1
+  export RUNNER_TOKEN_CMD="touch '${TEST_RUNNER_DIR}/token_resolved'; echo unexpected"
+  unset RUNNER_FRESH_CONTAINER GITHUB_PAT RUNNER_TOKEN RUNNER_REMOVE_TOKEN_CMD || true
+
+  set +e
+  output="$("${REPO_ROOT}/entrypoint.sh" 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects direct ephemeral mode without a fresh disposable container"
+  assert_contains "RUNNER_EPHEMERAL requires a fresh disposable container" "${output}" "Explains the required isolation contract"
+  assert_file_absent "${TEST_RUNNER_DIR}/token_resolved" "Fails before resolving a registration token"
+  assert_file_absent "${TEST_RUNNER_DIR}/config_called" "Fails before runner registration"
+)
+
+# -----------------------------------------------------------------------------
+# Test 23: supervisor creates a fresh --rm child for every generation
+# -----------------------------------------------------------------------------
+echo "Test 23: ephemeral supervisor child lifecycle"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   docker_log="${TMP_DIR}/supervisor_docker.log"
@@ -599,9 +630,9 @@ echo "Test 22: ephemeral supervisor child lifecycle"
 )
 
 # -----------------------------------------------------------------------------
-# Test 23: supervisor rejects one-shot credentials and cleans up on shutdown
+# Test 24: supervisor rejects one-shot credentials and cleans up on shutdown
 # -----------------------------------------------------------------------------
-echo "Test 23: ephemeral supervisor credentials and shutdown"
+echo "Test 24: ephemeral supervisor credentials and shutdown"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   GITHUB_URL="https://github.com/Verjson/test"
