@@ -6,6 +6,8 @@
   supervises one-job `--rm` children, rejects ambiguous booleans and one-shot
   credentials, keeps the Docker socket out of isolated jobs by default, and
   integration-tests that writable-layer markers cannot cross generations (#33).
+- Route this public repository's image publication through fixed hosted runners
+  so the persistent GCP group can deny all public-repository access.
 - Replace the workstation-local security policy URL with a portable
   repository-relative link.
 

@@ -68,6 +68,9 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 * **Published images**: BuildKit publishes SBOM and provenance attestations for the shared
   multi-architecture base and kind images. The workflow retains a receipt binding each
   commit-addressed tag to its immutable manifest digest.
+* **Public repository boundary**: Image publication runs on fixed GitHub-hosted
+  capacity. This public repository does not require access to the persistent
+  Verjson GCP runner group.
 * **Deployment**: Rollouts should consume the recorded digest, validate `ci` admission on
   the host, and retain the previous digest as the rollback target. Never broaden runner
   group access as part of an image rollout.
