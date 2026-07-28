@@ -194,9 +194,11 @@ target it via `runs-on`:
 The images live in `images/<kind>.Dockerfile` (all build `FROM gha-runner:base`) — add your
 own kind by dropping in a new Dockerfile and a matching entry in `app/internal/kinds/kinds.go`.
 
-> **Auth note:** `gha` passes your `gh` OAuth token into each container as `GITHUB_PAT`, so
-> registration tokens **auto-refresh on restart** (a one-shot token would expire after ~1h).
-> Treat it like any credential; only attach runners to repos/orgs you trust.
+> **Auth note:** In ephemeral mode, only the controller holds your renewable
+> `gh` OAuth token. It mints a short-lived, one-shot registration token for each
+> disposable job child and discards that token before workflow execution.
+> Persistent runners still receive `GITHUB_PAT` for restart-time refresh, so
+> attach those runners only to repositories you trust.
 
 ### Networking — no static IP, no open ports
 

@@ -11,7 +11,8 @@ cleanup() {
 trap cleanup EXIT
 
 export GITHUB_URL="https://github.com/Verjson/test"
-export GITHUB_PAT="integration-placeholder"
+unset GITHUB_PAT
+export RUNNER_TOKEN_CMD="printf integration-placeholder"
 export RUNNER_NAME="layer-test"
 export RUNNER_LABELS="self-hosted,isolated"
 export RUNNER_GROUP="isolated"
