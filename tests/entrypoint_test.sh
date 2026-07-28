@@ -280,9 +280,11 @@ EOF
   chmod +x "${TEST_RUNNER_DIR}/config.sh" "${TEST_RUNNER_DIR}/run.sh"
 
   export GITHUB_URL="https://github.com/my-org/my-repo"
+  unset GITHUB_PAT RUNNER_TOKEN_CMD RUNNER_REMOVE_TOKEN_CMD || true
   export RUNNER_TOKEN="mock_token"
   export RUNNER_DIR="${TEST_RUNNER_DIR}"
   export RUNNER_EPHEMERAL=1
+  export RUNNER_FRESH_CONTAINER=1
 
   source "${REPO_ROOT}/entrypoint.sh"
   main &
@@ -529,6 +531,98 @@ EOF
   assert_file_absent "${standalone_dir}/token_resolved" "Does not resolve a registration token"
   assert_file_absent "${standalone_dir}/config_called" "Does not invoke config.sh"
   assert_contains "CI runner admission passed." "${output}" "Reports successful standalone admission"
+)
+
+# -----------------------------------------------------------------------------
+# Test 21: RUNNER_EPHEMERAL is parsed as a real boolean
+# -----------------------------------------------------------------------------
+echo "Test 21: RUNNER_EPHEMERAL boolean parsing"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  for value in 1 true TRUE yes on; do
+    RUNNER_EPHEMERAL="${value}"
+    normalize_ephemeral_mode
+    assert_eq "1" "${RUNNER_EPHEMERAL_ENABLED}" "Accepts true value ${value}"
+  done
+  for value in '' 0 false FALSE no off; do
+    RUNNER_EPHEMERAL="${value}"
+    normalize_ephemeral_mode
+    assert_eq "0" "${RUNNER_EPHEMERAL_ENABLED}" "Accepts false value '${value}'"
+  done
+  RUNNER_EPHEMERAL="sometimes"
+  set +e
+  output="$(normalize_ephemeral_mode 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects an ambiguous ephemeral value"
+  assert_contains "must be one of" "${output}" "Explains the accepted boolean values"
+)
+
+# -----------------------------------------------------------------------------
+# Test 22: supervisor creates a fresh --rm child for every generation
+# -----------------------------------------------------------------------------
+echo "Test 22: ephemeral supervisor child lifecycle"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker_log="${TMP_DIR}/supervisor_docker.log"
+  : > "${docker_log}"
+  docker() {
+    printf '%s\n' "$*" >> "${docker_log}"
+    return 0
+  }
+  sleep() { :; }
+
+  GITHUB_URL="https://github.com/Verjson/test"
+  GITHUB_PAT="dummy"
+  RUNNER_NAME="isolated-1"
+  RUNNER_LABELS="self-hosted,isolated"
+  RUNNER_GROUP="isolated"
+  RUNNER_WORKDIR="_work"
+  RUNNER_IMAGE="gha-runner:test"
+  RUNNER_EPHEMERAL=true
+  RUNNER_EPHEMERAL_MAX_JOBS=2
+
+  supervise_ephemeral >/dev/null
+  run_count="$(grep -c '^run --rm ' "${docker_log}")"
+  remove_count="$(grep -c '^rm -f gha-isolated-1-job$' "${docker_log}")"
+  assert_eq "2" "${run_count}" "Runs two distinct disposable child generations"
+  assert_eq "2" "${remove_count}" "Sweeps a stale child before every generation"
+  assert_contains "RUNNER_EPHEMERAL=1" "$(< "${docker_log}")" "Marks every child runner one-job ephemeral"
+  assert_contains "RUNNER_FRESH_CONTAINER=1" "$(< "${docker_log}")" "Marks the supervisor-created child as a fresh layer"
+  if grep '^run --rm ' "${docker_log}" | grep -q -- '-v /var/run/docker.sock'; then
+    echo "  ✗ Default isolated child unexpectedly receives the Docker socket"
+    touch "${TMP_DIR}/failed_$(date +%s%N)_$RANDOM"
+  else
+    echo "  ✓ Default isolated child receives no Docker socket"
+    touch "${TMP_DIR}/passed_$(date +%s%N)_$RANDOM"
+  fi
+)
+
+# -----------------------------------------------------------------------------
+# Test 23: supervisor rejects one-shot credentials and cleans up on shutdown
+# -----------------------------------------------------------------------------
+echo "Test 23: ephemeral supervisor credentials and shutdown"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  GITHUB_URL="https://github.com/Verjson/test"
+  RUNNER_NAME="isolated-1"
+  RUNNER_IMAGE="gha-runner:test"
+  RUNNER_EPHEMERAL=1
+  RUNNER_TOKEN="one-shot"
+  unset GITHUB_PAT RUNNER_TOKEN_CMD || true
+  set +e
+  output="$(supervise_ephemeral 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a static token that cannot register the next generation"
+  assert_contains "requires GITHUB_PAT or RUNNER_TOKEN_CMD" "${output}" "Requires a renewable credential source"
+
+  cleanup_log="${TMP_DIR}/supervisor_cleanup.log"
+  docker() { printf '%s\n' "$*" >> "${cleanup_log}"; }
+  EPHEMERAL_CHILD_NAME="gha-isolated-1-job"
+  stop_ephemeral_child
+  assert_contains "stop --time 10 gha-isolated-1-job" "$(< "${cleanup_log}")" "Stops the active child on shutdown"
+  assert_contains "rm -f gha-isolated-1-job" "$(< "${cleanup_log}")" "Removes the child after shutdown"
 )
 
 echo "-----------------------------------------------------------------------------"

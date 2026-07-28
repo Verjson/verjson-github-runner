@@ -70,7 +70,7 @@ func Run(login, token string) error {
 		huh.NewInput().Title("Runner group").Description("Org runners only; leave 'Default' for repos.").Value(&group),
 		huh.NewInput().Title("Work folder").Value(&workdir),
 		huh.NewConfirm().Title("Ephemeral runners?").Description("Each handles one job then re-registers.").Value(&ephemeral),
-		huh.NewConfirm().Title("Mount host docker socket?").Description("Lets CI use Docker, but grants host-root. Trusted repos only.").Value(&mountSock),
+		huh.NewConfirm().Title("Mount host docker socket?").Description("Trusted only. In ephemeral mode the controller always has it; this toggle separately gives it to job children.").Value(&mountSock),
 		huh.NewInput().Title("HTTPS proxy (optional)").
 			Description("For locked-down networks. Leave blank if outbound 443 is open.").
 			Placeholder("http://proxy.internal:3128").Value(&proxy),

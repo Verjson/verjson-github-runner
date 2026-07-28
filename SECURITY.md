@@ -16,8 +16,25 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 ## 2. Hardening Controls
 
 ### Ephemeral / JIT Runners (`RUNNER_EPHEMERAL=1`)
-* **Control**: Set `RUNNER_EPHEMERAL=1` in container environment variables or `--ephemeral` when calling `./config.sh`.
-* **Effect**: The runner processes exactly **one job** and immediately de-registers and shuts down upon completion. Any temporary state, workspace files, or memory tokens are completely destroyed, preventing cross-job persistence.
+* **Control**: Select **Ephemeral runners** in `gha`. The manager starts a
+  long-lived controller that creates each job runner with `docker run --rm`.
+  The child registers with GitHub's `--ephemeral` flag, processes one job, exits,
+  and loses its writable layer before another child is created.
+* **Effect**: A file written anywhere in job container N is absent from job
+  container N+1. Unit tests cover boolean parsing, renewable-token admission,
+  stale-child cleanup, shutdown, and socket exclusion. Docker integration tests
+  run two generations whose image fails if a prior generation's root marker is
+  present, then signal a supervisor during a blocking job and assert the active
+  child is removed.
+* **Fail closed**: `RUNNER_EPHEMERAL=0` and other documented false values remain
+  persistent. Invalid values fail startup. A direct ephemeral runner requires
+  `RUNNER_FRESH_CONTAINER=1` from an external one-job orchestrator; setting
+  `--ephemeral` inside a Docker container configured with `restart:
+  unless-stopped` is explicitly not accepted as isolation.
+* **Controller boundary**: The controller holds the renewable registration
+  credential and host Docker socket but never executes workflow code. Job
+  children receive no socket by default. Enabling
+  `RUNNER_CHILD_MOUNT_SOCK=1` is a separate trusted-only decision.
 
 ### Least-Privilege Workflow Permissions
 * **Control**: Specify explicit `permissions:` blocks in all workflow definitions:
@@ -52,6 +69,9 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 * **Published images**: BuildKit publishes SBOM and provenance attestations for the shared
   multi-architecture base and kind images. The workflow retains a receipt binding each
   commit-addressed tag to its immutable manifest digest.
+* **Public repository boundary**: Image publication runs on fixed GitHub-hosted
+  capacity. This public repository does not require access to the persistent
+  Verjson GCP runner group.
 * **Deployment**: Rollouts should consume the recorded digest, validate `ci` admission on
   the host, and retain the previous digest as the rollback target. Never broaden runner
   group access as part of an image rollout.
