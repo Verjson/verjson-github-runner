@@ -3,3 +3,11 @@
 
 # Compiled manager binary
 /gha
+
+# Agent tooling residue — never repository content (org convention; Verjson/.github#188)
+.claude/worktrees/
+.worktrees/
+.tokensave/
+.claude/settings.local.json
+.claude/.headroom_wrap_marker.json
+AGENTS.md
