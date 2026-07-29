@@ -98,6 +98,28 @@ Attaching `ci` to an organization runner remains a rollout action. Use the diges
 from the publish workflow, verify admission on the target host, and preserve the existing
 runner-group repository allowlist.
 
+### Lane labels name a capability, never a provider
+
+A runner's **lane** is the trust-and-lifecycle pool it belongs to. Two lanes exist, and a
+runner carries exactly one of them:
+
+| Lane | Lifecycle | Carried with | Runs |
+|------|-----------|--------------|------|
+| `general` | shared, persistent registration | `linux`, `x64`, and any kind labels | trusted workloads (push, internal PRs) |
+| `isolated` | one job per container, then discarded | `untrusted-pr`, `ephemeral`, `no-host-docker` | untrusted PR code from forks |
+
+The `isolated` companion labels are load-bearing security properties enforced at admission
+(see [`SECURITY.md`](SECURITY.md)), not descriptions — carry all three or the runner fails
+closed.
+
+Provider and host names — `GCP`, `gce`, a droplet name, a hostname — are **not** lane
+labels. A runner keeps its lane label when its host moves between clouds, so migrating the
+shared pool from one provider to another is a provisioning change, not a `runs-on` change
+in every consuming repository. Kind labels (`rust`, `node`, `python`, `go`) and the `ci`
+contract label compose on top of a lane label rather than replacing it.
+
+Refs: [`Verjson/.github` ADR 0033](https://github.com/Verjson/.github), [#80](https://github.com/Verjson/verjson-github-runner/issues/80).
+
 ## The `gha` manager — TUI (recommended)
 
 `gha` is a small terminal app that provisions and monitors **many** runners at once.
