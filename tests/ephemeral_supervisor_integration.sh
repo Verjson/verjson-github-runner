@@ -53,7 +53,17 @@ for _ in $(seq 1 30); do
 done
 docker container inspect gha-shutdown-test-job >/dev/null
 kill -TERM "${supervisor_pid}"
-wait "${supervisor_pid}"
+supervisor_status=0
+if wait "${supervisor_pid}"; then
+  supervisor_status=0
+else
+  supervisor_status=$?
+fi
+expected_sigterm_status=1
+if [[ "${supervisor_status}" -ne "${expected_sigterm_status}" ]]; then
+  echo "signalled supervisor exited with unexpected status ${supervisor_status} (expected ${expected_sigterm_status})" >&2
+  exit 1
+fi
 for _ in $(seq 1 10); do
   if ! docker container inspect gha-shutdown-test-job >/dev/null 2>&1; then
     break
