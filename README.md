@@ -330,8 +330,10 @@ to it, so you can ignore groups entirely unless you want the access control.
 | `Dockerfile.pwsh` | Opt-in PowerShell variant layered on the root `Dockerfile` image (see below). |
 | `.env` | Non-secret configuration for the compose path (git-ignored). |
 
-> The root `Dockerfile` is a pre-`images/` leftover kept only for backward compat — the
-> live image is `images/base.Dockerfile`.
+> Two live images, different jobs: the root `Dockerfile` is what `setup.sh` and
+> `docker-compose.yml` build for the persistent lane (and what `Dockerfile.pwsh` layers
+> on), while `images/base.Dockerfile` is the portable published image that carries the
+> `ci` contract.
 
 ## Notes
 - **Token options** (`entrypoint.sh`, in order of preference):
