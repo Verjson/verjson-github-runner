@@ -2,8 +2,14 @@ services:
   runner:
     build: .
     container_name: gha-runner-home
-    restart: unless-stopped
+    restart: "no"
     env_file: .env
+    environment:
+      GITHUB_PAT_FIFO: /run/gha-secrets/github-pat
+    volumes:
+      - type: bind
+        source: ${GITHUB_PAT_DIR:?create a private directory containing a mode-0600 github-pat FIFO}
+        target: /run/gha-secrets
     # Optional: let workflows use Docker on the host (docker build/run in CI).
     # WARNING: mounting the host socket gives the container root-equivalent
     # access to the host. Only enable for trusted, private repos.

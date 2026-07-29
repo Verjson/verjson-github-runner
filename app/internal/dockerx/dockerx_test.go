@@ -1,6 +1,7 @@
 package dockerx
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -58,6 +59,12 @@ func TestEphemeralRunUsesSupervisorAndKeepsSocketOutOfJobByDefault(t *testing.T)
 	if slices.Contains(args, "RUNNER_CHILD_MOUNT_SOCK=1") {
 		t.Fatalf("job child unexpectedly receives the Docker socket: %v", joined)
 	}
+	if strings.Contains(joined, "token") || slices.Contains(args, "GITHUB_PAT=token") {
+		t.Fatalf("renewable credential appears in docker argv: %v", joined)
+	}
+	if !slices.Contains(args, "GITHUB_PAT_FIFO=/run/gha-secrets/github-pat") {
+		t.Fatalf("one-use credential transport is not configured: %v", joined)
+	}
 }
 
 func TestEphemeralRunCanExplicitlyPassSocketToTrustedJob(t *testing.T) {
@@ -66,5 +73,19 @@ func TestEphemeralRunCanExplicitlyPassSocketToTrustedJob(t *testing.T) {
 	})
 	if !slices.Contains(args, "RUNNER_CHILD_MOUNT_SOCK=1") {
 		t.Fatalf("explicit trusted socket selection was not passed to supervisor: %v", args)
+	}
+}
+
+func TestPATTransportRejectsReplay(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/github-pat"
+	if err := makePATFIFO(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := deliverPAT(path, "secret"); err == nil {
+		t.Fatal("delivery unexpectedly replayed after transport destruction")
 	}
 }

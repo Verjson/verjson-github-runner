@@ -197,8 +197,9 @@ own kind by dropping in a new Dockerfile and a matching entry in `app/internal/k
 > **Auth note:** In ephemeral mode, only the controller holds your renewable
 > `gh` OAuth token. It mints a short-lived, one-shot registration token for each
 > disposable job child and discards that token before workflow execution.
-> Persistent runners still receive `GITHUB_PAT` for restart-time refresh, so
-> attach those runners only to repositories you trust.
+> Launchers deliver the renewable token once through a mode-0600 FIFO; Docker
+> metadata, argv, and logs never contain it. Automatic container restart is
+> disabled because the one-use transport cannot be replayed.
 
 ### Networking — no static IP, no open ports
 
@@ -221,7 +222,7 @@ filtered, allowlist: `github.com`, `api.github.com`, `*.actions.githubuserconten
 ## Quick start — shell scripts (alternative, no Go/gh needed)
 
 Run the setup script for your OS; it prompts for the URL, PAT, and runner name(s),
-then builds the image and launches each runner as an auto-restarting service. You
+then builds the image and launches each runner as a background service. You
 can create several at once with comma-separated names:
 
 ```bash
@@ -238,8 +239,9 @@ All of these are collected from you at the prompts, so nothing is hardcoded. The
 **runner group** defaults to `Default` (works out of the box); only change it if
 you've created a custom group in the org first — see [Runner groups](#runner-groups-org-runners-only).
 
-Each name becomes its own container `gha-<name>` with `--restart unless-stopped`
-(so it also survives reboots while the Docker daemon is enabled).
+Each name becomes its own container `gha-<name>` with `--restart no`. Re-run the
+launcher after a container or host restart so it can create a fresh credential
+transport.
 
 ```bash
 docker ps --filter name=gha-           # see them
@@ -259,11 +261,15 @@ jobs:
 
 ## Alternative — single runner via compose
 
-1. Edit `.env` (`GITHUB_URL`, `GITHUB_PAT`, `RUNNER_NAME`, `RUNNER_LABELS`).
+1. Edit `.env` (`GITHUB_URL`, `RUNNER_NAME`, `RUNNER_LABELS`).
    - Org runner → classic PAT with `admin:org`.
    - Repo runner → classic PAT with `repo`.
-2. `docker compose up -d --build` then `docker compose logs -f`.
-3. `docker compose down` stops and cleanly de-registers it.
+2. Create the one-use transport and start Compose:
+   `GITHUB_PAT_DIR="$(mktemp -d)"; chmod 700 "$GITHUB_PAT_DIR"; mkfifo -m 600 "$GITHUB_PAT_DIR/github-pat"; export GITHUB_PAT_DIR`.
+3. Run `docker compose up -d --build`, then write the PAT once with
+   `printf '%s\n' "$GITHUB_PAT" >"$GITHUB_PAT_DIR/github-pat"` and remove the
+   empty directory.
+4. `docker compose down` stops and cleanly de-registers it.
 
 ## Runner groups (org runners only)
 
@@ -298,15 +304,15 @@ to it, so you can ignore groups entirely unless you want the access control.
 | `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
 | `.github/workflows/publish-images.yml` | CI: build + push attested multi-arch images and retain immutable digest receipts. |
 | `entrypoint.sh` | Admits the exact `ci` contract before credentials, mints/uses a registration token, runs, and de-registers on stop. |
-| `docker-compose.yml` | Single-runner alternative (`restart: unless-stopped`). |
-| `.env` | Config + secrets for the compose path (git-ignored). |
+| `docker-compose.yml` | Single-runner alternative with one-use PAT delivery. |
+| `.env` | Non-secret configuration for the compose path (git-ignored). |
 
 > The root `Dockerfile` is a pre-`images/` leftover kept only for backward compat — the
 > live image is `images/base.Dockerfile`.
 
 ## Notes
 - **Token options** (`entrypoint.sh`, in order of preference):
-  - `GITHUB_PAT` — recommended for a host you control; self-refreshes each start/stop.
+  - `GITHUB_PAT_FIFO` — one-use mode-0600 FIFO carrying a renewable PAT.
   - `RUNNER_TOKEN_CMD` — a command that prints a fresh registration token each start,
     so a host injects its own minting (GCP passes the VM's App-key mint script — no
     PAT/private key on the box) and still gets PAT-style refresh.

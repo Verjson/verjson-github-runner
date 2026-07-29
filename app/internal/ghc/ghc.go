@@ -2,9 +2,9 @@
 // runner registration data without ever asking the user to paste a PAT.
 //
 // The user's existing `gh auth login` session is reused: `gh auth token` yields an OAuth
-// token that works as a Bearer token against the REST API. We hand that token to the
-// container as GITHUB_PAT so entrypoint.sh can auto-refresh registration tokens on every
-// restart (a one-shot registration token would expire after ~1h and break restarts).
+// token that works as a Bearer token against the REST API. The launcher transfers that
+// token through a one-use FIFO so entrypoint.sh can mint fresh registration and removal
+// tokens without retaining the renewable credential in Docker metadata.
 package ghc
 
 import (

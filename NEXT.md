@@ -2,6 +2,10 @@
 
 ## 2026-07-28
 
+- Replace inspectable Docker `GITHUB_PAT` configuration with a one-use,
+  mode-0600 host FIFO consumed into non-exported supervisor memory; disable
+  unsafe automatic restart and require explicit owner acceptance before
+  rollout (#43).
 - Preserve the shared dependency-update policy locally so Renovate can operate
   without resolving an inaccessible private organization preset.
 - Pin every third-party action in the shell and Go test workflow to its reviewed

@@ -2,13 +2,21 @@
 #
 # Interactive setup for one or more Dockerized GitHub Actions self-hosted runners.
 # Prompts for the details, builds the image, and launches each runner as an
-# auto-restarting background service (Docker `--restart unless-stopped`, so they
-# also come back after a reboot as long as the Docker daemon is enabled).
+# background service. One-use credential delivery intentionally requires the
+# operator to re-run setup after a host or container restart.
 #
 set -euo pipefail
 cd "$(dirname "$0")"
 
 IMAGE="gha-runner:local"
+transport_dir=""
+delivery_container=""
+
+cleanup_transport() {
+  [[ -z "${delivery_container}" ]] || docker rm -f "${delivery_container}" >/dev/null 2>&1 || true
+  [[ -z "${transport_dir}" ]] || rm -rf "${transport_dir}"
+}
+trap cleanup_transport EXIT INT TERM
 
 bold() { printf "\033[1m%s\033[0m\n" "$1"; }
 ask()  { local p="$1" d="${2:-}" v; if [ -n "$d" ]; then read -rp "$p [$d]: " v; echo "${v:-$d}"; else read -rp "$p: " v; echo "$v"; fi; }
@@ -34,19 +42,30 @@ for raw in "${NAMES[@]}"; do
   name="$(echo "$raw" | xargs)"   # trim whitespace
   [ -z "$name" ] && continue
   container="gha-${name}"
+  delivery_container="${container}"
   bold "Starting runner '${name}' (container: ${container})"
   docker rm -f "$container" >/dev/null 2>&1 || true
+  transport_dir="$(mktemp -d)"
+  chmod 700 "$transport_dir"
+  pat_fifo="${transport_dir}/github-pat"
+  mkfifo -m 600 "$pat_fifo"
   docker run -d \
     --name "$container" \
-    --restart unless-stopped \
+    --restart no \
+    --mount "type=bind,src=${transport_dir},dst=/run/gha-secrets" \
     -e GITHUB_URL="$GITHUB_URL" \
-    -e GITHUB_PAT="$GITHUB_PAT" \
+    -e GITHUB_PAT_FIFO=/run/gha-secrets/github-pat \
     -e RUNNER_NAME="$name" \
     -e RUNNER_LABELS="$LABELS" \
     -e RUNNER_GROUP="$RUNNER_GROUP" \
     -e RUNNER_WORKDIR="$RUNNER_WORKDIR" \
     "$IMAGE" >/dev/null
+  printf '%s\n' "$GITHUB_PAT" >"$pat_fifo"
+  rm -rf "$transport_dir"
+  transport_dir=""
+  delivery_container=""
 done
+unset GITHUB_PAT
 
 echo
 bold "Runners are up:"
@@ -54,4 +73,5 @@ docker ps --filter "name=gha-" --format "table {{.Names}}\t{{.Status}}"
 echo
 echo "Follow logs:   docker logs -f gha-<name>   (wait for 'Listening for Jobs')"
 echo "Stop one:      docker rm -f gha-<name>      (leaves an offline entry unless de-registered)"
+echo "Restart one:   re-run setup; the one-use credential transport intentionally disables Docker auto-restart"
 echo "Target it in a workflow:  runs-on: [ ${LABELS//,/, } ]"
