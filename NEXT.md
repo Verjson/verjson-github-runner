@@ -1,61 +1,16 @@
-# Next
+<!--
+  This file is a static pointer — do NOT add changelog entries here.
 
-## 2026-07-29
+  To avoid the merge conflicts that a shared, prepend-only changelog causes when
+  several PRs are in flight, this repo keeps its running log as one file per
+  entry under NEXT/. Add your entry as a new fragment; you never touch a shared
+  file, so two PRs can never conflict on the log.
+-->
+# NEXT — running log (fragment-based)
 
-- Migrate the Charm TUI stack (bubbletea, huh, lipgloss) to v2 in one change,
-  since the three majors share the `charmbracelet/x/*` support modules and
-  cannot land separately. The canonical v2 import paths are now
-  `charm.land/*/v2`. Styled output printed outside Bubble Tea now goes through
-  the lipgloss printers so ANSI is still stripped when stdout is not a TTY
-  (#69, #70, #71).
-- Ship `unzip` and `python3` in the base image and admit both in the portable
-  `ci` contract, so composite actions that unpack zip release archives stop
-  dying with exit 127 and a runner missing either tool never advertises `ci`
-  (#72).
-- Keep the SIGTERM integration check running through expected supervisor
-  termination so it can verify child-container cleanup, while rejecting
-  unexpected supervisor exit statuses (#56).
-- Report a typed, actionable timeout when PAT delivery cannot open its FIFO
-  because no reader connects before the deadline, while preserving the
-  underlying system error for diagnosis (#53).
-- Report dashboard restart failures with actionable relaunch-via-setup guidance
-  while preserving the runner refresh after a successful restart (#54).
+The running log lives in [`NEXT/`](NEXT/) as one markdown file per entry.
 
-## 2026-07-28
-
-- Add `unzip` to the base runner image so containerized runners satisfy the
-  portable `ci` toolchain contract (gh, jq, git, curl, bash, tar, unzip, node,
-  docker) and no longer break actions that extract zip archives, such as
-  claude-code-action's setup-bun step (#59).
-- Replace inspectable Docker `GITHUB_PAT` configuration with a one-use,
-  mode-0600 host FIFO consumed into non-exported supervisor memory; disable
-  unsafe automatic restart and require explicit owner acceptance before
-  rollout (#43).
-- Redact proxy URL credentials from startup diagnostics while preserving the
-  original uppercase or lowercase proxy environment value for consumers (#42).
-- Preserve the shared dependency-update policy locally so Renovate can operate
-  without resolving an inaccessible private organization preset.
-- Pin every third-party action in the shell and Go test workflow to its reviewed
-  immutable commit SHA while retaining Renovate-readable major-version comments
-  (#39).
-- Make `RUNNER_EPHEMERAL` a tested fresh-container lifecycle: `gha` now
-  supervises one-job `--rm` children, rejects ambiguous booleans and one-shot
-  credentials, keeps the Docker socket out of isolated jobs by default, and
-  integration-tests that writable-layer markers cannot cross generations or
-  survive a signalled controller shutdown (#33).
-- Route this public repository's image publication through fixed hosted runners
-  so the persistent GCP group can deny all public-repository access.
-- Replace the workstation-local security policy URL with a portable
-  repository-relative link.
-
-## 2026-07-27
-
-- Correct the cloud-runner example to use provider-neutral `--runner-image` with
-  an immutable manifest digest and document the restricted-group, GCP ephemeral,
-  and DigitalOcean stable lifecycle requirements.
-- Make the documented standalone container `ci` command dispatch directly to
-  fail-closed capability admission without touching registration inputs.
-- Define one attested Verjson/Tequity `ci` runner image contract with fail-closed
-  case-insensitive capability admission, Node.js 24, pinned upstream checksums and
-  workflow actions, SBOM/provenance, and validated digest receipts.
-- Fix Renovate preset resolution by using the organization-local private preset.
+- **Add an entry:** create `NEXT/YYYY-MM-DD-<slug>.md` in the same commit as your
+  change (see [`NEXT/README.md`](NEXT/README.md) for the format). Do not edit this
+  file or any other shared changelog — that is the whole point.
+- **Read the whole log, newest first:** `scripts/render-next.sh`.

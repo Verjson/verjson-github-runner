@@ -18,6 +18,8 @@ jobs:
         run: bash tests/entrypoint_test.sh
       - name: Prove ephemeral jobs receive fresh writable layers
         run: bash tests/ephemeral_supervisor_integration.sh
+      - name: NEXT changelog fragments render cleanly
+        run: bash scripts/render-next.sh >/dev/null
 
   go-tests:
     runs-on: ubuntu-latest
