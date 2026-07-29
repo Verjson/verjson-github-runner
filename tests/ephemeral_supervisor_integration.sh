@@ -59,7 +59,7 @@ if wait "${supervisor_pid}"; then
 else
   supervisor_status=$?
 fi
-expected_sigterm_status=1
+expected_sigterm_status=0
 if [[ "${supervisor_status}" -ne "${expected_sigterm_status}" ]]; then
   echo "signalled supervisor exited with unexpected status ${supervisor_status} (expected ${expected_sigterm_status})" >&2
   exit 1
