@@ -2,6 +2,10 @@
 
 ## 2026-07-28
 
+- Replace inspectable Docker `GITHUB_PAT` configuration with a one-use,
+  mode-0600 host FIFO consumed into non-exported supervisor memory; disable
+  unsafe automatic restart and require explicit owner acceptance before
+  rollout (#43).
 - Redact proxy URL credentials from startup diagnostics while preserving the
   original uppercase or lowercase proxy environment value for consumers (#42).
 - Preserve the shared dependency-update policy locally so Renovate can operate

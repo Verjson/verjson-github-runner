@@ -31,8 +31,10 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   `RUNNER_FRESH_CONTAINER=1` from an external one-job orchestrator; setting
   `--ephemeral` inside a Docker container configured with `restart:
   unless-stopped` is explicitly not accepted as isolation.
-* **Controller boundary**: The controller alone holds the renewable
-  `GITHUB_PAT` or `RUNNER_TOKEN_CMD` credential and the host Docker socket. It
+* **Controller boundary**: The launcher transfers a renewable PAT through a
+  one-use mode-0600 FIFO that is destroyed before registration. The controller
+  holds it only in non-exported process memory, or uses
+  `RUNNER_TOKEN_CMD`, alongside the host Docker socket. It
   mints a short-lived, one-shot registration token for each job child and
   streams it over stdin so it is absent from Docker argv, inspectable
   environment, logs, images, and reusable host state. The renewable credential
@@ -40,6 +42,9 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   child discards registration material before executing workflow code and
   receives no socket by default. Enabling `RUNNER_CHILD_MOUNT_SOCK=1` is a
   separate trusted-only decision.
+* **Restart constraint**: Docker auto-restart is disabled for FIFO-launched
+  containers. A restart cannot replay the destroyed transport; an authorized
+  launcher must create a new one.
 
 ### Least-Privilege Workflow Permissions
 * **Control**: Specify explicit `permissions:` blocks in all workflow definitions:

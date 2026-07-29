@@ -4,7 +4,7 @@ set -euo pipefail
 # Environment variables:
 #   GITHUB_URL       — required, target org or repo URL (e.g. https://github.com/your-org or https://github.com/you/repo)
 #   RUNNER_DIR       — optional, working directory containing actions-runner binaries (defaults to /home/runner/actions-runner)
-#   GITHUB_PAT       — optional, PAT for token minting and auto-refresh
+#   GITHUB_PAT_FIFO  — optional, one-use mode-0600 FIFO carrying a PAT
 #   RUNNER_TOKEN_CMD — optional, command that outputs a fresh registration token on (re)start
 #   RUNNER_REMOVE_TOKEN_CMD — optional, command that outputs a fresh removal token on cleanup
 #   RUNNER_TOKEN     — optional, static one-shot registration token (~1h expiration)
@@ -29,6 +29,35 @@ normalize_ephemeral_mode() {
       echo "RUNNER_EPHEMERAL must be one of true/false, 1/0, yes/no, or on/off; got '${RUNNER_EPHEMERAL}'." >&2
       return 1 ;;
   esac
+}
+
+consume_github_pat() {
+  [[ -n "${GITHUB_PAT_FIFO:-}" ]] || return 0
+  [[ -p "${GITHUB_PAT_FIFO}" ]] || {
+    echo "GITHUB_PAT_FIFO must name an existing one-use FIFO." >&2
+    return 1
+  }
+  local mode
+  mode="$(stat -c '%a' "${GITHUB_PAT_FIFO}")"
+  [[ "${mode}" == 600 ]] || {
+    echo "GITHUB_PAT_FIFO must have mode 0600." >&2
+    return 1
+  }
+  local delivered_pat
+  if ! IFS= read -r delivered_pat <"${GITHUB_PAT_FIFO}"; then
+    rm -f "${GITHUB_PAT_FIFO}"
+    echo "PAT delivery was interrupted." >&2
+    return 1
+  fi
+  rm -f "${GITHUB_PAT_FIFO}"
+  [[ -n "${delivered_pat}" ]] || {
+    echo "PAT delivery was empty." >&2
+    return 1
+  }
+  GITHUB_PAT="${delivered_pat}"
+  unset delivered_pat
+  unset GITHUB_PAT_FIFO
+  export -n GITHUB_PAT 2>/dev/null || true
 }
 
 append_child_env() {
@@ -332,6 +361,7 @@ cleanup() {
 }
 
 main() {
+  consume_github_pat || return 1
   if [[ "${1:-}" == "ci" ]]; then
     attest_ci_runner
     return $?

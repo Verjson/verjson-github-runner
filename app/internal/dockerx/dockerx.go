@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // Prefix is prepended to every managed container name so they're easy to find.
@@ -47,7 +50,7 @@ type RunSpec struct {
 	Name      string // logical runner name; container becomes gha-<Name>
 	Image     string // image tag to run
 	URL       string // GITHUB_URL
-	Token     string // gh OAuth token, passed as GITHUB_PAT (auto-refreshes registration)
+	Token     string // gh OAuth token, delivered through a one-use host FIFO
 	Labels    string // comma-separated
 	Group     string // runner group (org only)
 	Workdir   string // _work by default
@@ -64,24 +67,45 @@ func (s RunSpec) Container() string { return Prefix + s.Name }
 func Run(s RunSpec) (string, error) {
 	_ = exec.Command("docker", "rm", "-f", s.Container()).Run() // replace if it exists
 
-	args := runArgs(s)
+	transportDir, err := os.MkdirTemp("", "gha-pat-*")
+	if err != nil {
+		return "", fmt.Errorf("create PAT transport: %w", err)
+	}
+	defer os.RemoveAll(transportDir)
+	if err := os.Chmod(transportDir, 0700); err != nil {
+		return "", fmt.Errorf("secure PAT transport: %w", err)
+	}
+	fifo := filepath.Join(transportDir, "github-pat")
+	if err := makePATFIFO(fifo); err != nil {
+		return "", err
+	}
+	args := runArgsWithFIFO(s, transportDir)
 
 	out, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("docker run %s: %w: %s", s.Container(), err, strings.TrimSpace(string(out)))
 	}
+	if err := deliverPAT(fifo, s.Token); err != nil {
+		_ = exec.Command("docker", "rm", "-f", s.Container()).Run()
+		return "", fmt.Errorf("deliver PAT to %s: %w", s.Container(), err)
+	}
 	return strings.TrimSpace(string(out)), nil
 }
 
 func runArgs(s RunSpec) []string {
+	return runArgsWithFIFO(s, "/tmp/gha-pat")
+}
+
+func runArgsWithFIFO(s RunSpec, transportDir string) []string {
 	args := []string{
 		"run", "-d",
 		"--name", s.Container(),
-		"--restart", "unless-stopped",
+		"--restart", "no",
 		"--label", "gha.managed=true",
 		"--label", "gha.kind=" + kindFromImage(s.Image),
 		"-e", "GITHUB_URL=" + s.URL,
-		"-e", "GITHUB_PAT=" + s.Token,
+		"--mount", "type=bind,src=" + transportDir + ",dst=/run/gha-secrets",
+		"-e", "GITHUB_PAT_FIFO=/run/gha-secrets/github-pat",
 		"-e", "RUNNER_NAME=" + s.Name,
 		"-e", "RUNNER_LABELS=" + s.Labels,
 		"-e", "RUNNER_GROUP=" + s.Group,
@@ -120,6 +144,33 @@ func runArgs(s RunSpec) []string {
 		args = append(args, "supervise")
 	}
 	return args
+}
+
+func makePATFIFO(path string) error {
+	if err := syscall.Mkfifo(path, 0600); err != nil {
+		return fmt.Errorf("create PAT FIFO: %w", err)
+	}
+	return nil
+}
+
+func deliverPAT(path, token string) error {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			file := os.NewFile(uintptr(fd), path)
+			_, writeErr := fmt.Fprintln(file, token)
+			closeErr := file.Close()
+			if writeErr != nil {
+				return writeErr
+			}
+			return closeErr
+		}
+		if !errors.Is(err, syscall.ENXIO) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 // Runner is one managed container's live snapshot.
@@ -237,9 +288,10 @@ func Remove(name string) error {
 	return exec.Command("docker", "rm", "-f", Prefix+name).Run()
 }
 
-// Restart restarts a runner container.
+// Restart is intentionally unavailable for one-use PAT transports. Relaunching creates
+// a fresh FIFO and preserves the renewable-credential lifecycle.
 func Restart(name string) error {
-	return exec.Command("docker", "restart", Prefix+name).Run()
+	return errors.New("runner restart requires relaunch through gha so a fresh PAT transport can be created")
 }
 
 // kindFromImage extracts the tag suffix (rust/node/...) from gha-runner:<kind>.
