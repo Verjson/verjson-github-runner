@@ -2,6 +2,12 @@
 
 ## 2026-07-29
 
+- Migrate the Charm TUI stack (bubbletea, huh, lipgloss) to v2 in one change,
+  since the three majors share the `charmbracelet/x/*` support modules and
+  cannot land separately. The canonical v2 import paths are now
+  `charm.land/*/v2`. Styled output printed outside Bubble Tea now goes through
+  the lipgloss printers so ANSI is still stripped when stdout is not a TTY
+  (#69, #70, #71).
 - Keep the SIGTERM integration check running through expected supervisor
   termination so it can verify child-container cleanup, while rejecting
   unexpected supervisor exit statuses (#56).

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/Verjson/github-runner-docker-compose/app/internal/dockerx"
 )
@@ -19,7 +19,7 @@ func TestViewRenders(t *testing.T) {
 			{Name: "node-1", Kind: "node", State: "exited", CPU: "", Mem: "", Job: "Exited"},
 		},
 	}
-	out := m.View()
+	out := m.View().Content
 	for _, want := range []string{"NAME", "KIND", "STATE", "rust-1", "node-1", "restart", "quit"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("View() missing %q", want)
@@ -29,14 +29,24 @@ func TestViewRenders(t *testing.T) {
 
 func TestViewEmpty(t *testing.T) {
 	m := model{width: 80, height: 24}
-	if !strings.Contains(m.View(), "No managed runners") {
+	if !strings.Contains(m.View().Content, "No managed runners") {
 		t.Errorf("empty View() should prompt to add runners")
+	}
+}
+
+func TestViewUsesAltScreen(t *testing.T) {
+	// The dashboard must own the whole screen and restore the user's terminal on quit.
+	// Bubble Tea v2 moved this from a program option to a per-view flag, so assert it here.
+	for _, m := range []model{{width: 80, height: 24}, {width: 80, height: 24, viewLogs: true}} {
+		if !m.View().AltScreen {
+			t.Errorf("View() with viewLogs=%v should render on the alt screen", m.viewLogs)
+		}
 	}
 }
 
 func TestLogsView(t *testing.T) {
 	m := model{width: 80, height: 24, viewLogs: true, logsFor: "rust-1", logs: "line1\nline2\nline3"}
-	out := m.View()
+	out := m.View().Content
 	if !strings.Contains(out, "logs: rust-1") || !strings.Contains(out, "line3") {
 		t.Errorf("logsView() = %q", out)
 	}
@@ -48,7 +58,7 @@ func TestRestartReportsRelaunchInstructionsWhenUnavailable(t *testing.T) {
 	t.Cleanup(func() { restartRunner = original })
 
 	m := model{runners: []dockerx.Runner{{Name: "rust-1"}}}
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated, cmd := m.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	updated, _ = updated.(model).Update(cmd())
 	status := updated.(model).status
 
