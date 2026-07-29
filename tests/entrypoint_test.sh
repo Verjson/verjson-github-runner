@@ -363,10 +363,12 @@ echo "Test 15: passing ci admission exercises the complete tool contract"
   base64() { echo "base64 $*" >> "${command_log}"; }
   tar() { echo "tar $*" >> "${command_log}"; }
   gzip() { echo "gzip $*" >> "${command_log}"; }
+  unzip() { echo "unzip $*" >> "${command_log}"; }
+  python3() { echo "python3 $*" >> "${command_log}"; }
 
   attest_ci_runner >/dev/null
 
-  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version'
+  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version'
   assert_eq "${expected_commands}" "$(< "${command_log}")" "Exercises every required ci capability"
 )
 
@@ -525,7 +527,9 @@ echo "Test 20: standalone ci dispatches directly to admission"
   base64() { echo "base64 $*" >> "${command_log}"; }
   tar() { echo "tar $*" >> "${command_log}"; }
   gzip() { echo "gzip $*" >> "${command_log}"; }
-  export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip
+  unzip() { echo "unzip $*" >> "${command_log}"; }
+  python3() { echo "python3 $*" >> "${command_log}"; }
+  export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip unzip python3
 
   cat << EOF > "${standalone_dir}/config.sh"
 #!/usr/bin/env bash
@@ -542,7 +546,7 @@ EOF
   status=$?
   set -e
 
-  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version'
+  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version'
   assert_eq "0" "${status}" "Standalone ci exits successfully without registration inputs"
   assert_eq "${expected_commands}" "$(< "${command_log}")" "Dispatches directly to the complete ci attestation"
   assert_file_absent "${standalone_dir}/token_resolved" "Does not resolve a registration token"
@@ -783,6 +787,179 @@ echo "Test 27: proxy diagnostic inputs"
   assert_eq "Using proxy: <invalid proxy URL>" "${output}" "Uses a safe diagnostic for malformed lowercase proxies"
   assert_not_contains "malformed-secret" "${output}" "Does not expose malformed proxy credentials in failure diagnostics"
   assert_eq "not-a-url:malformed-secret@proxy.example.com" "${http_proxy}" "Leaves malformed proxy input unchanged for consumers"
+)
+
+# -----------------------------------------------------------------------------
+# Test 28: ci admission verifies zip archive extraction
+# -----------------------------------------------------------------------------
+echo "Test 28: ci admission verifies zip archive extraction"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_unzip.log"
+
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() { echo "docker $*" >> "${command_log}"; }
+  node() {
+    echo "node $*" >> "${command_log}"
+    echo "v24.18.0"
+  }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() { echo "jq $*" >> "${command_log}"; }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() { echo "bash $*" >> "${command_log}"; }
+  curl() { echo "curl $*" >> "${command_log}"; }
+  grep() { echo "grep $*" >> "${command_log}"; }
+  sed() { echo "sed $*" >> "${command_log}"; }
+  awk() { echo "awk $*" >> "${command_log}"; }
+  find() { echo "find $*" >> "${command_log}"; }
+  base64() { echo "base64 $*" >> "${command_log}"; }
+  tar() { echo "tar $*" >> "${command_log}"; }
+  gzip() { echo "gzip $*" >> "${command_log}"; }
+  unzip() { echo "unzip $*" >> "${command_log}"; }
+  python3() { echo "python3 $*" >> "${command_log}"; }
+
+  attest_ci_runner >/dev/null
+
+  assert_contains "unzip -v" "$(< "${command_log}")" "Admits unzip so action installers can extract zip release archives"
+)
+
+# -----------------------------------------------------------------------------
+# Test 29: ci admission fails closed without python3
+# -----------------------------------------------------------------------------
+echo "Test 29: ci admission fails closed without python3"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_no_python3.log"
+
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() { echo "docker $*" >> "${command_log}"; }
+  node() {
+    echo "node $*" >> "${command_log}"
+    echo "v24.18.0"
+  }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() { echo "jq $*" >> "${command_log}"; }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() { echo "bash $*" >> "${command_log}"; }
+  curl() { echo "curl $*" >> "${command_log}"; }
+  grep() { echo "grep $*" >> "${command_log}"; }
+  sed() { echo "sed $*" >> "${command_log}"; }
+  awk() { echo "awk $*" >> "${command_log}"; }
+  find() { echo "find $*" >> "${command_log}"; }
+  base64() { echo "base64 $*" >> "${command_log}"; }
+  tar() { echo "tar $*" >> "${command_log}"; }
+  gzip() { echo "gzip $*" >> "${command_log}"; }
+  unzip() { echo "unzip $*" >> "${command_log}"; }
+  python3() {
+    echo "python3 $*" >> "${command_log}"
+    return 127
+  }
+
+  set +e
+  output="$(attest_ci_runner 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects ci admission when python3 is unavailable"
+  assert_contains "python3 is unavailable or unhealthy" "${output}" "Identifies python3 as the failed capability"
+  assert_contains "python3 --version" "$(< "${command_log}")" "Probes python3 as part of the ci tool contract"
+)
+
+# -----------------------------------------------------------------------------
+# Test 30: ci admission fails closed without unzip
+# -----------------------------------------------------------------------------
+echo "Test 30: ci admission fails closed without unzip"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_no_unzip.log"
+
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() { echo "docker $*" >> "${command_log}"; }
+  node() {
+    echo "node $*" >> "${command_log}"
+    echo "v24.18.0"
+  }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() { echo "jq $*" >> "${command_log}"; }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() { echo "bash $*" >> "${command_log}"; }
+  curl() { echo "curl $*" >> "${command_log}"; }
+  grep() { echo "grep $*" >> "${command_log}"; }
+  sed() { echo "sed $*" >> "${command_log}"; }
+  awk() { echo "awk $*" >> "${command_log}"; }
+  find() { echo "find $*" >> "${command_log}"; }
+  base64() { echo "base64 $*" >> "${command_log}"; }
+  tar() { echo "tar $*" >> "${command_log}"; }
+  gzip() { echo "gzip $*" >> "${command_log}"; }
+  unzip() {
+    echo "unzip $*" >> "${command_log}"
+    return 127
+  }
+  python3() { echo "python3 $*" >> "${command_log}"; }
+
+  set +e
+  output="$(attest_ci_runner 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects ci admission when unzip is unavailable"
+  assert_contains "unzip is unavailable or unhealthy" "${output}" "Identifies unzip as the failed capability"
+  assert_not_contains "python3 --version" "$(< "${command_log}")" "Stops admission immediately after the unzip failure"
+)
+
+# -----------------------------------------------------------------------------
+# Test 31: a missing archive toolchain blocks registration entirely
+# -----------------------------------------------------------------------------
+echo "Test 31: a missing archive toolchain blocks registration entirely"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  toolchain_dir="${TMP_DIR}/toolchain_boundary"
+  mkdir -p "${toolchain_dir}"
+
+  cat << 'EOF' > "${toolchain_dir}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  cat << 'EOF' > "${toolchain_dir}/run.sh"
+#!/usr/bin/env bash
+touch run_called
+EOF
+  chmod +x "${toolchain_dir}/config.sh" "${toolchain_dir}/run.sh"
+
+  GITHUB_URL="https://github.com/my-org"
+  GITHUB_PAT="dummy_pat"
+  RUNNER_DIR="${toolchain_dir}"
+  RUNNER_LABELS="self-hosted,CI"
+  get_token() {
+    touch "${toolchain_dir}/token_minted"
+    echo "unexpected_token"
+  }
+  gh() { :; }
+  docker() { :; }
+  node() { echo "v24.18.0"; }
+  npm() { :; }
+  jq() { :; }
+  git() { :; }
+  bash() { :; }
+  curl() { :; }
+  grep() { :; }
+  sed() { :; }
+  awk() { :; }
+  find() { :; }
+  base64() { :; }
+  tar() { :; }
+  gzip() { :; }
+  unzip() { return 127; }
+
+  set +e
+  main >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Main fails closed when the ci archive toolchain is incomplete"
+  assert_file_absent "${toolchain_dir}/token_minted" "Does not mint a token without unzip"
+  assert_file_absent "${toolchain_dir}/config_called" "Does not register without unzip"
+  assert_file_absent "${toolchain_dir}/run_called" "Does not start the runner without unzip"
 )
 
 echo "-----------------------------------------------------------------------------"
