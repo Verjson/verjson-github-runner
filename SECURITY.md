@@ -64,8 +64,8 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 * **Control**: When `RUNNER_LABELS` contains the exact `ci` label, matched
   case-insensitively to GitHub's label semantics, `entrypoint.sh`
   exercises GitHub CLI, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git,
-  bash, curl, grep, sed, awk, find, base64, tar, and gzip before resolving any
-  registration credential.
+  bash, curl, grep, sed, awk, find, base64, tar, gzip, unzip, and python3 before
+  resolving any registration credential.
 * **Effect**: A container cannot advertise `ci` and accept a job with a partial toolchain.
   Failure prevents both registration-token minting and `config.sh` registration; there is
   no caller-controlled bypass.
