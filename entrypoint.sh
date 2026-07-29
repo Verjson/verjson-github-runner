@@ -305,6 +305,8 @@ attest_ci_runner() {
   run_admission_check "base64" base64 --version || return 1
   run_admission_check "tar" tar --version || return 1
   run_admission_check "gzip" gzip --version || return 1
+  run_admission_check "unzip" unzip -v || return 1
+  run_admission_check "python3" python3 --version || return 1
   echo "CI runner admission passed."
 }
 

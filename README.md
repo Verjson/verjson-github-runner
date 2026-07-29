@@ -70,8 +70,8 @@ The exact `ci` label (matched case-insensitively, like GitHub labels) declares a
 capability contract shared by Verjson and Tequity. Before minting a registration token
 or running `config.sh`, the container
 exercises `gh`, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git, bash,
-curl, grep, sed, awk, find, base64, tar, and gzip. If any check fails, startup stops and
-the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt
+curl, grep, sed, awk, find, base64, tar, gzip, unzip, and python3. If any check fails,
+startup stops and the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt
 into this contract. PowerShell is not part of the portable Linux contract.
 
 Deploy immutable digests rather than mutable tags:
