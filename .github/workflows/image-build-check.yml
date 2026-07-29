@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - Dockerfile
+      - Dockerfile.pwsh
       - images/**
       - entrypoint.sh
       - .github/workflows/image-build-check.yml
@@ -68,6 +69,16 @@ jobs:
       # so it can break on its own and is built in parallel.
       - name: Build root Dockerfile
         run: docker build --platform linux/amd64 -f Dockerfile -t gha-runner:pr-check-root .
+      # The pwsh variant is a thin FROM on the root image, so it is built on the root image
+      # from this same commit — the same wiring the kind images use against the base. Without
+      # this, a root Dockerfile change that breaks the variant (a dropped .NET dependency, a
+      # renamed user) is only discovered by whoever builds the variant by hand.
+      - name: Build pwsh variant on the just-built root image
+        run: |
+          docker build --platform linux/amd64 \
+            -f Dockerfile.pwsh \
+            --build-arg "BASE_IMAGE=gha-runner:pr-check-root" \
+            -t gha-runner:pr-check-root-pwsh .
 
   # Weekly/on-demand arm64 build of the base image only. Everything arch-specific lives in
   # images/base.Dockerfile (the per-arch gh and Node checksums); the kind images add no
