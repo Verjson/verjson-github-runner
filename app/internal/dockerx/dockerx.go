@@ -153,8 +153,15 @@ func makePATFIFO(path string) error {
 	return nil
 }
 
+// ErrPATDeliveryTimeout identifies a FIFO delivery attempt whose reader never connected.
+var ErrPATDeliveryTimeout = errors.New("PAT delivery timeout")
+
 func deliverPAT(path, token string) error {
-	deadline := time.Now().Add(10 * time.Second)
+	return deliverPATWithin(path, token, 10*time.Second, 25*time.Millisecond, time.Sleep)
+}
+
+func deliverPATWithin(path, token string, timeout, retryDelay time.Duration, sleep func(time.Duration)) error {
+	deadline := time.Now().Add(timeout)
 	for {
 		fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
 		if err == nil {
@@ -166,10 +173,13 @@ func deliverPAT(path, token string) error {
 			}
 			return closeErr
 		}
-		if !errors.Is(err, syscall.ENXIO) || time.Now().After(deadline) {
+		if !errors.Is(err, syscall.ENXIO) {
 			return err
 		}
-		time.Sleep(25 * time.Millisecond)
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("%w: reader did not open FIFO within %s: %w", ErrPATDeliveryTimeout, timeout, err)
+		}
+		sleep(retryDelay)
 	}
 }
 
