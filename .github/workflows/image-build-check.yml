@@ -22,7 +22,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: image-build-check-${{ github.ref }}
+  # github.ref alone is not distinguishing here: schedule and workflow_dispatch both resolve
+  # to refs/heads/main, so an on-demand arm64 run and the weekly cron would cancel each other.
+  # Keying on the event too keeps each trigger in its own lane.
+  group: image-build-check-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
