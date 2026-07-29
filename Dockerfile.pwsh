@@ -1,0 +1,49 @@
+# PowerShell variant of the persistent (compose / setup.sh) runner image.
+#
+# Layered rather than folded into the root Dockerfile because pwsh is ~150 MB extracted
+# and only one consumer needs it (verjson-agents runs tests/install.test.ps1); the default
+# runner everyone else pulls stays lean. Same shape as images/<kind>.Dockerfile: a variant
+# is a thin FROM on an image built from this repo, never a forked copy of it.
+#
+# This is deliberately NOT part of images/*. Those build the portable `ci` contract image,
+# which entrypoint.sh admits against and which excludes PowerShell by agreement (see
+# "The `ci` runner contract" in README.md, and #29). Adding pwsh there would widen a
+# contract shared with Tequity; adding it here does not.
+#
+# Build (two steps — the base is the root Dockerfile from this same checkout):
+#   docker build -t gha-runner:persistent .
+#   docker build -f Dockerfile.pwsh --build-arg BASE_IMAGE=gha-runner:persistent \
+#     -t gha-runner:persistent-pwsh .
+ARG BASE_IMAGE=gha-runner:persistent
+FROM ${BASE_IMAGE}
+
+# PowerShell 7.6 is the current LTS. Pinned and checksum-verified against Microsoft's
+# published hashes.sha256 for the release, matching how images/base.Dockerfile pins gh and
+# Node — the Microsoft apt repository is deliberately not used, since that would make the
+# installed version float with whatever the repo serves at build time.
+ARG PWSH_VERSION=7.6.4
+ARG PWSH_SHA256_AMD64=4471b5a36bfe86ec7af8525d36bb1cacba0128e7aac22d05cc064bc00e604721
+ARG PWSH_SHA256_ARM64=d4ef2382fa452f2ccbdb48a01adbbce9ed64954872123970c16be6d086d1224b
+ARG TARGETARCH
+
+USER root
+
+# The .NET runtime dependencies pwsh needs (libicu and friends) are already present: the
+# Actions runner is itself .NET and the root Dockerfile runs ./bin/installdependencies.sh.
+RUN case "${TARGETARCH}" in \
+      amd64) PWSH_ARCH=x64; PWSH_SHA256="${PWSH_SHA256_AMD64}" ;; \
+      arm64) PWSH_ARCH=arm64; PWSH_SHA256="${PWSH_SHA256_ARM64}" ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    PWSH_ARCHIVE="powershell-${PWSH_VERSION}-linux-${PWSH_ARCH}.tar.gz"; \
+    curl -fsSL -o "/tmp/${PWSH_ARCHIVE}" \
+      "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/${PWSH_ARCHIVE}"; \
+    echo "${PWSH_SHA256}  /tmp/${PWSH_ARCHIVE}" | sha256sum -c -; \
+    mkdir -p /opt/microsoft/powershell/7; \
+    tar -xzf "/tmp/${PWSH_ARCHIVE}" -C /opt/microsoft/powershell/7; \
+    chmod +x /opt/microsoft/powershell/7/pwsh; \
+    ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh; \
+    rm -f "/tmp/${PWSH_ARCHIVE}"; \
+    pwsh --version
+
+USER runner

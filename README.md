@@ -271,6 +271,28 @@ jobs:
    empty directory.
 4. `docker compose down` stops and cleanly de-registers it.
 
+### PowerShell variant (opt-in)
+
+The image built by `docker compose` and `setup.sh` (the root `Dockerfile`) carries
+`ca-certificates curl jq git sudo tar gzip` and no PowerShell. `Dockerfile.pwsh` adds a
+pinned, checksum-verified `pwsh` on top of it for jobs that run PowerShell suites — it is
+a **separate tag**, not a change to the default runner, because PowerShell adds ~270 MB
+and only some lanes need it:
+
+```sh
+docker build -t gha-runner:persistent .
+docker build -f Dockerfile.pwsh --build-arg BASE_IMAGE=gha-runner:persistent \
+  -t gha-runner:persistent-pwsh .
+```
+
+Point compose at the variant with `image: gha-runner:persistent-pwsh` (dropping `build:`),
+or set `IMAGE=gha-runner:persistent-pwsh` for `setup.sh`.
+
+> This is separate from `images/base.Dockerfile`. PowerShell is **not** part of the
+> portable `ci` contract that `entrypoint.sh` admits (see
+> [`The ci runner contract`](#the-ci-runner-contract)), and the variant does not change
+> that — it only adds a tool to the persistent-lane image.
+
 ## Runner groups (org runners only)
 
 A **runner group** lets an org organize runners and control **which repositories**
@@ -305,6 +327,7 @@ to it, so you can ignore groups entirely unless you want the access control.
 | `.github/workflows/publish-images.yml` | CI: build + push attested multi-arch images and retain immutable digest receipts. |
 | `entrypoint.sh` | Admits the exact `ci` contract before credentials, mints/uses a registration token, runs, and de-registers on stop. |
 | `docker-compose.yml` | Single-runner alternative with one-use PAT delivery. |
+| `Dockerfile.pwsh` | Opt-in PowerShell variant layered on the root `Dockerfile` image (see below). |
 | `.env` | Non-secret configuration for the compose path (git-ignored). |
 
 > The root `Dockerfile` is a pre-`images/` leftover kept only for backward compat — the
