@@ -742,6 +742,49 @@ echo "Test 25: ephemeral supervisor credentials and shutdown"
   assert_contains "EPHEMERAL_TEARDOWN" "${output}" "Emits a verified signal teardown receipt"
 )
 
+# -----------------------------------------------------------------------------
+# Test 26: proxy diagnostics redact credentials without mutating proxy inputs
+# -----------------------------------------------------------------------------
+echo "Test 26: credential-safe proxy diagnostics"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  HTTPS_PROXY="https://runner-user:super-secret@proxy.example.com:8443/path"
+  original_proxy="${HTTPS_PROXY}"
+
+  output="$(log_configured_proxy 2>&1)"
+
+  assert_eq "Using proxy: https://proxy.example.com:8443" "${output}" "Redacts proxy userinfo while retaining scheme, host, and port"
+  assert_not_contains "runner-user" "${output}" "Omits the proxy username"
+  assert_not_contains "super-secret" "${output}" "Omits the proxy password"
+  assert_eq "${original_proxy}" "${HTTPS_PROXY}" "Leaves the HTTPS proxy value unchanged for consumers"
+)
+
+# -----------------------------------------------------------------------------
+# Test 27: proxy diagnostics cover case variants, plain URLs, and failures
+# -----------------------------------------------------------------------------
+echo "Test 27: proxy diagnostic inputs"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy NO_PROXY || true
+
+  HTTP_PROXY="http://proxy.example.com:3128"
+  assert_eq "Using proxy: http://proxy.example.com:3128" "$(log_configured_proxy 2>&1)" "Logs a credential-free uppercase proxy"
+
+  unset HTTP_PROXY
+  https_proxy="https://lower-user:lower-secret@lower.example.com:9443"
+  output="$(log_configured_proxy 2>&1)"
+  assert_eq "Using proxy: https://lower.example.com:9443" "${output}" "Supports a credential-bearing lowercase HTTPS proxy"
+  assert_not_contains "lower-user" "${output}" "Redacts lowercase proxy usernames"
+  assert_not_contains "lower-secret" "${output}" "Redacts lowercase proxy passwords"
+
+  unset https_proxy
+  http_proxy="not-a-url:malformed-secret@proxy.example.com"
+  output="$(log_configured_proxy 2>&1)"
+  assert_eq "Using proxy: <invalid proxy URL>" "${output}" "Uses a safe diagnostic for malformed lowercase proxies"
+  assert_not_contains "malformed-secret" "${output}" "Does not expose malformed proxy credentials in failure diagnostics"
+  assert_eq "not-a-url:malformed-secret@proxy.example.com" "${http_proxy}" "Leaves malformed proxy input unchanged for consumers"
+)
+
 echo "-----------------------------------------------------------------------------"
 passed_count=$(find "${TMP_DIR}" -name 'passed_*' | wc -l | tr -d ' ')
 failed_count=$(find "${TMP_DIR}" -name 'failed_*' | wc -l | tr -d ' ')

@@ -67,6 +67,35 @@ append_child_env() {
   fi
 }
 
+proxy_for_log() {
+  local proxy="$1" scheme remainder authority hostport
+  if [[ "${proxy}" != *://* ]]; then
+    printf '%s\n' '<invalid proxy URL>'
+    return
+  fi
+
+  scheme="${proxy%%://*}"
+  remainder="${proxy#*://}"
+  authority="${remainder%%[/?#]*}"
+  hostport="${authority##*@}"
+  if [[ ! "${scheme}" =~ ^[[:alpha:]][[:alnum:]+.-]*$ ||
+        -z "${hostport}" ||
+        "${hostport}" =~ [[:space:]] ]]; then
+    printf '%s\n' '<invalid proxy URL>'
+    return
+  fi
+
+  printf '%s://%s\n' "${scheme}" "${hostport}"
+}
+
+log_configured_proxy() {
+  local proxy="${HTTPS_PROXY:-${HTTP_PROXY:-${https_proxy:-${http_proxy:-}}}}"
+  [[ -n "${proxy}" ]] || return 0
+  printf 'Using proxy: %s%s\n' \
+    "$(proxy_for_log "${proxy}")" \
+    "${NO_PROXY:+ (no_proxy: ${NO_PROXY})}"
+}
+
 stop_ephemeral_child() {
   if [[ -n "${EPHEMERAL_CHILD_NAME:-}" ]]; then
     docker stop --time 10 "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
@@ -363,9 +392,7 @@ main() {
 
   # Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
   # environment automatically. We just surface it in the logs when one is configured.
-  if [[ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}" ]]; then
-    echo "Using proxy: ${HTTPS_PROXY:-${HTTP_PROXY}}${NO_PROXY:+ (no_proxy: ${NO_PROXY})}"
-  fi
+  log_configured_proxy
 
   parse_github_url
   if [[ "${RUNNER_TOKEN_STDIN:-0}" == 1 ]]; then
