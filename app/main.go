@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Verjson/github-runner-docker-compose/app/internal/dashboard"
 	"github.com/Verjson/github-runner-docker-compose/app/internal/dockerx"
@@ -65,7 +65,7 @@ func main() {
 			// interactive default flow already handled the menu
 		}
 	default:
-		fmt.Println(errStyle.Render("unknown command: " + cmd))
+		lipgloss.Println(errStyle.Render("unknown command: " + cmd))
 		usage()
 		os.Exit(2)
 	}
@@ -106,8 +106,8 @@ func upFlow() error {
 		if !errors.Is(err, ghc.ErrNotAuthed) {
 			return err
 		}
-		fmt.Println(titleStyle.Render("GitHub login"))
-		fmt.Println(dimStyle.Render("  You're not logged in — launching `gh auth login`…"))
+		lipgloss.Println(titleStyle.Render("GitHub login"))
+		lipgloss.Println(dimStyle.Render("  You're not logged in — launching `gh auth login`…"))
 		fmt.Println()
 		if err := ghc.Login(); err != nil {
 			return fmt.Errorf("gh auth login did not complete: %w", err)
@@ -116,7 +116,7 @@ func upFlow() error {
 			return err
 		}
 	}
-	fmt.Println(okStyle.Render("✓ ") + "signed in as " + login)
+	lipgloss.Println(okStyle.Render("✓ ") + "signed in as " + login)
 	fmt.Println()
 
 	// 2. Network preflight — confirm outbound 443 to GitHub is open.
@@ -126,7 +126,7 @@ func upFlow() error {
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewConfirm().Title("Outbound checks failed. Continue anyway?").
 				Description("Runners won't connect until 443 to GitHub is reachable.").Value(&proceed),
-		)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+		)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 			return err
 		}
 		if !proceed {
@@ -159,13 +159,13 @@ func menu(login, token string) error {
 					huh.NewOption("🌐  Network check (outbound 443)", "net"),
 					huh.NewOption("🚪  Quit", "quit"),
 				).Value(&choice),
-		)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+		)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 			return err
 		}
 		switch choice {
 		case "add":
 			if err := wizard.Run(login, token); err != nil {
-				fmt.Println(errStyle.Render(err.Error()))
+				lipgloss.Println(errStyle.Render(err.Error()))
 			}
 		case "dash":
 			if err := dashboard.Run(); err != nil {
@@ -204,30 +204,30 @@ func preflight() (login, token string, err error) {
 }
 
 func doctor() error {
-	fmt.Println(titleStyle.Render("Environment check"))
+	lipgloss.Println(titleStyle.Render("Environment check"))
 	check("docker", dockerx.EnsureReady())
 	_, ghErr := ghc.EnsureReady()
 	check("gh installed + authenticated", ghErr)
 	if ghErr == nil {
 		login, _ := ghc.CurrentLogin()
-		fmt.Println(dimStyle.Render("  gh user: " + login))
+		lipgloss.Println(dimStyle.Render("  gh user: " + login))
 	}
 	if err := ensureRepoRoot(); err != nil {
 		check("repo layout (images/)", err)
 	} else {
 		wd, _ := os.Getwd()
 		check("repo layout (images/)", nil)
-		fmt.Println(dimStyle.Render("  repo root: " + wd))
+		lipgloss.Println(dimStyle.Render("  repo root: " + wd))
 	}
 	return nil
 }
 
 func check(name string, err error) {
 	if err != nil {
-		fmt.Printf("  %s %s\n", errStyle.Render("✗"), name)
-		fmt.Println(dimStyle.Render("    " + err.Error()))
+		lipgloss.Printf("  %s %s\n", errStyle.Render("✗"), name)
+		lipgloss.Println(dimStyle.Render("    " + err.Error()))
 	} else {
-		fmt.Printf("  %s %s\n", okStyle.Render("✓"), name)
+		lipgloss.Printf("  %s %s\n", okStyle.Render("✓"), name)
 	}
 }
 
@@ -237,7 +237,7 @@ func listRunners() {
 		fatal(err)
 	}
 	if len(runners) == 0 {
-		fmt.Println(dimStyle.Render("No managed runners. Run `gha add` to create some."))
+		lipgloss.Println(dimStyle.Render("No managed runners. Run `gha add` to create some."))
 		return
 	}
 	fmt.Printf("%-16s %-8s %-12s %-8s %-16s %s\n", "NAME", "KIND", "STATE", "CPU", "MEM", "JOB")
@@ -273,7 +273,7 @@ func ensureRepoRoot() error {
 }
 
 func usage() {
-	fmt.Println(titleStyle.Render("gha — GitHub self-hosted runner manager"))
+	lipgloss.Println(titleStyle.Render("gha — GitHub self-hosted runner manager"))
 	fmt.Println(`
 Usage:
   gha up           One command: gh login (if needed) → network check → add runners
@@ -289,6 +289,6 @@ Auth is taken from your GitHub CLI session (gh auth login). No PAT to paste.`)
 }
 
 func fatal(err error) {
-	fmt.Fprintln(os.Stderr, errStyle.Render("error: ")+err.Error())
+	lipgloss.Fprintln(os.Stderr, errStyle.Render("error: ")+err.Error())
 	os.Exit(1)
 }

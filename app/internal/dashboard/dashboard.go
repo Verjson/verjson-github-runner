@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Verjson/github-runner-docker-compose/app/internal/dockerx"
 )
@@ -52,7 +52,7 @@ type model struct {
 
 // Run starts the dashboard event loop (blocks until the user quits).
 func Run() error {
-	p := tea.NewProgram(model{}, tea.WithAltScreen())
+	p := tea.NewProgram(model{})
 	_, err := p.Run()
 	return err
 }
@@ -88,13 +88,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(fetch(), tick())
 	case restartMsg:
 		m.status = fmt.Sprintf("restart unavailable for %s: %v; relaunch via setup to create fresh credentials", msg.name, msg.err)
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.viewLogs {
 		switch msg.String() {
 		case "q", "esc", "l":
@@ -152,7 +152,15 @@ func remove(name string) tea.Cmd {
 	return func() tea.Msg { _ = dockerx.Remove(name); return fetch()() }
 }
 
-func (m model) View() string {
+// View renders the dashboard onto the alternate screen buffer. Bubble Tea v2 moved
+// alt-screen from a program option (v1's tea.WithAltScreen) to a per-view flag.
+func (m model) View() tea.View {
+	v := tea.NewView(m.content())
+	v.AltScreen = true
+	return v
+}
+
+func (m model) content() string {
 	if m.viewLogs {
 		return m.logsView()
 	}

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -118,30 +118,30 @@ func AllOK(results []Result) bool {
 
 // Print renders a human-friendly report and returns whether everything passed.
 func Print() bool {
-	fmt.Println(titleSty.Render("Network preflight"))
+	lipgloss.Println(titleSty.Render("Network preflight"))
 	if p := ProxyURL(); p != "" {
-		fmt.Println(dimStyle.Render("  via proxy: " + p))
+		lipgloss.Println(dimStyle.Render("  via proxy: " + p))
 	}
 	results := Check()
 	for _, r := range results {
 		if r.OK {
-			fmt.Printf("  %s %-40s %s\n", okStyle.Render("✓"), r.Endpoint, dimStyle.Render(r.Detail))
+			lipgloss.Printf("  %s %-40s %s\n", okStyle.Render("✓"), r.Endpoint, dimStyle.Render(r.Detail))
 		} else {
-			fmt.Printf("  %s %-40s %s\n", failStyle.Render("✗"), r.Endpoint, dimStyle.Render(r.Detail))
+			lipgloss.Printf("  %s %-40s %s\n", failStyle.Render("✗"), r.Endpoint, dimStyle.Render(r.Detail))
 		}
 	}
 	ok := AllOK(results)
 	fmt.Println()
 	if ok {
-		fmt.Println(okStyle.Render("  Outbound 443 to GitHub is open — the runner will connect fine."))
+		lipgloss.Println(okStyle.Render("  Outbound 443 to GitHub is open — the runner will connect fine."))
 	} else {
-		fmt.Println(failStyle.Render("  Some endpoints are unreachable.") +
+		lipgloss.Println(failStyle.Render("  Some endpoints are unreachable.") +
 			dimStyle.Render("  Allow outbound 443 to the hosts above, or set HTTPS_PROXY."))
 	}
 	// Inbound is intentionally not tested: self-hosted runners open an OUTBOUND long-poll
 	// to GitHub and receive jobs over it. No inbound ports, port-forwarding, or static IP
 	// are required — so there is nothing meaningful to probe on the inbound side.
-	fmt.Println(dimStyle.Render("  Inbound: not required. Runners poll GitHub outbound; no open ports / static IP needed."))
+	lipgloss.Println(dimStyle.Render("  Inbound: not required. Runners poll GitHub outbound; no open ports / static IP needed."))
 	return ok
 }
 

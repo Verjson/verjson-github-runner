@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Verjson/github-runner-docker-compose/app/internal/dockerx"
 	"github.com/Verjson/github-runner-docker-compose/app/internal/ghc"
@@ -40,8 +40,8 @@ type Plan struct {
 
 // Run executes the wizard end-to-end. login is the authenticated gh user (for display).
 func Run(login, token string) error {
-	fmt.Println(titleStyle.Render("＋ Add self-hosted runners"))
-	fmt.Println(dimStyle.Render("   signed in as " + login))
+	lipgloss.Println(titleStyle.Render("＋ Add self-hosted runners"))
+	lipgloss.Println(dimStyle.Render("   signed in as " + login))
 	fmt.Println()
 
 	target, err := chooseTarget()
@@ -49,12 +49,12 @@ func Run(login, token string) error {
 		return err
 	}
 
-	fmt.Print(dimStyle.Render("Checking your access to " + target.Slug() + "… "))
+	lipgloss.Print(dimStyle.Render("Checking your access to " + target.Slug() + "… "))
 	if err := ghc.Preflight(target); err != nil {
-		fmt.Println(errStyle.Render("no"))
+		lipgloss.Println(errStyle.Render("no"))
 		return handleScope(target, err)
 	}
-	fmt.Println(okStyle.Render("ok"))
+	lipgloss.Println(okStyle.Render("ok"))
 
 	counts, err := chooseCounts()
 	if err != nil {
@@ -76,7 +76,7 @@ func Run(login, token string) error {
 			Placeholder("http://proxy.internal:3128").Value(&proxy),
 		huh.NewInput().Title("No-proxy hosts (optional)").
 			Description("Comma-separated hosts that bypass the proxy.").Value(&noProxy),
-	)).WithTheme(huh.ThemeCharm())
+	)).WithTheme(huh.ThemeFunc(huh.ThemeCharm))
 	if err := opts.Run(); err != nil {
 		return err
 	}
@@ -87,11 +87,11 @@ func Run(login, token string) error {
 	confirm := true
 	if err := huh.NewForm(huh.NewGroup(
 		huh.NewConfirm().Title(fmt.Sprintf("Build & launch %d runner(s)?", len(plan.Specs))).Value(&confirm),
-	)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+	)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 		return err
 	}
 	if !confirm {
-		fmt.Println(dimStyle.Render("Cancelled."))
+		lipgloss.Println(dimStyle.Render("Cancelled."))
 		return nil
 	}
 
@@ -114,17 +114,17 @@ func chooseTarget() (ghc.Target, error) {
 				huh.NewOption("An organization", modeOrg),
 				huh.NewOption("Type owner/repo or org myself", modeType),
 			).Value(&mode),
-	)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+	)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 		return ghc.Target{}, err
 	}
 
 	switch mode {
 	case modeRepo:
-		fmt.Print(dimStyle.Render("Loading repos you can administer… "))
+		lipgloss.Print(dimStyle.Render("Loading repos you can administer… "))
 		repos, err := ghc.ListRepos(200)
 		fmt.Println()
 		if err != nil || len(repos) == 0 {
-			fmt.Println(dimStyle.Render("(none found — enter one manually)"))
+			lipgloss.Println(dimStyle.Render("(none found — enter one manually)"))
 			return typeTarget()
 		}
 		sort.Strings(repos)
@@ -132,23 +132,23 @@ func chooseTarget() (ghc.Target, error) {
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Repository").Height(12).
 				Options(huh.NewOptions(repos...)...).Value(&pick),
-		)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+		)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 			return ghc.Target{}, err
 		}
 		return ghc.ParseTarget(pick)
 	case modeOrg:
-		fmt.Print(dimStyle.Render("Loading your organizations… "))
+		lipgloss.Print(dimStyle.Render("Loading your organizations… "))
 		orgs, err := ghc.ListOrgs()
 		fmt.Println()
 		if err != nil || len(orgs) == 0 {
-			fmt.Println(dimStyle.Render("(none found — enter one manually)"))
+			lipgloss.Println(dimStyle.Render("(none found — enter one manually)"))
 			return typeTarget()
 		}
 		var pick string
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Organization").Height(12).
 				Options(huh.NewOptions(orgs...)...).Value(&pick),
-		)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+		)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 			return ghc.Target{}, err
 		}
 		return ghc.Target{IsOrg: true, Owner: pick}, nil
@@ -164,7 +164,7 @@ func typeTarget() (ghc.Target, error) {
 			Placeholder("owner/repo   or   my-org   or   https://github.com/...").
 			Validate(func(s string) error { _, err := ghc.ParseTarget(s); return err }).
 			Value(&raw),
-	)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+	)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 		return ghc.Target{}, err
 	}
 	return ghc.ParseTarget(raw)
@@ -196,7 +196,7 @@ func chooseCounts() ([]kindCount, error) {
 				return nil
 			}).
 			Value(&picked),
-	)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+	)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 		return nil, err
 	}
 
@@ -212,7 +212,7 @@ func chooseCounts() ([]kindCount, error) {
 			Value(countStrs[id]).
 			Validate(validPositiveInt))
 	}
-	if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+	if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 		return nil, err
 	}
 
@@ -290,7 +290,7 @@ func existingNames() map[string]bool {
 
 func printSummary(p Plan) {
 	fmt.Println()
-	fmt.Println(titleStyle.Render("Plan"))
+	lipgloss.Println(titleStyle.Render("Plan"))
 	fmt.Printf("  Target    %s  (%s)\n", p.Target.Slug(), targetKind(p.Target))
 	if p.Ephemeral {
 		fmt.Println("  Mode      ephemeral (one job each)")
@@ -310,7 +310,7 @@ func printSummary(p Plan) {
 	for _, k := range keys {
 		fmt.Printf("  %-9s %d runner(s)\n", k, byKind[k])
 	}
-	fmt.Printf("  %s\n", dimStyle.Render(fmt.Sprintf("%d container(s) total → names %s",
+	lipgloss.Printf("  %s\n", dimStyle.Render(fmt.Sprintf("%d container(s) total → names %s",
 		len(p.Specs), joinNames(p.Specs))))
 	fmt.Println()
 }
@@ -318,7 +318,7 @@ func printSummary(p Plan) {
 // apply builds each needed image once, then launches every container.
 func apply(p Plan) error {
 	// Always ensure the base image exists first.
-	fmt.Println(titleStyle.Render("Building images"))
+	lipgloss.Println(titleStyle.Render("Building images"))
 	if err := dockerx.Build(kinds.Base.Dockerfile, kinds.Base.Image, "", os.Stdout); err != nil {
 		return fmt.Errorf("building base image: %w", err)
 	}
@@ -328,7 +328,7 @@ func apply(p Plan) error {
 			continue
 		}
 		k, _ := kinds.ByID(imageKind(s.Image))
-		fmt.Println(dimStyle.Render("→ " + k.Name))
+		lipgloss.Println(dimStyle.Render("→ " + k.Name))
 		if err := dockerx.Build(k.Dockerfile, k.Image, kinds.Base.Image, os.Stdout); err != nil {
 			return fmt.Errorf("building %s image: %w", k.Name, err)
 		}
@@ -336,16 +336,16 @@ func apply(p Plan) error {
 	}
 
 	fmt.Println()
-	fmt.Println(titleStyle.Render("Launching runners"))
+	lipgloss.Println(titleStyle.Render("Launching runners"))
 	for _, s := range p.Specs {
 		if _, err := dockerx.Run(s); err != nil {
-			fmt.Println(errStyle.Render("  ✗ " + s.Name + ": " + err.Error()))
+			lipgloss.Println(errStyle.Render("  ✗ " + s.Name + ": " + err.Error()))
 			continue
 		}
-		fmt.Println(okStyle.Render("  ✓ "+s.Container()) + dimStyle.Render("  ["+s.Labels+"]"))
+		lipgloss.Println(okStyle.Render("  ✓ "+s.Container()) + dimStyle.Render("  ["+s.Labels+"]"))
 	}
 	fmt.Println()
-	fmt.Println(okStyle.Render("Done.") + dimStyle.Render("  Open the dashboard to watch them:  gha dashboard"))
+	lipgloss.Println(okStyle.Render("Done.") + dimStyle.Render("  Open the dashboard to watch them:  gha dashboard"))
 	return nil
 }
 
@@ -373,7 +373,7 @@ func joinNames(specs []dockerx.RunSpec) string {
 
 // handleScope offers to run `gh auth refresh` when preflight fails on missing scope.
 func handleScope(t ghc.Target, cause error) error {
-	fmt.Println(errStyle.Render(cause.Error()))
+	lipgloss.Println(errStyle.Render(cause.Error()))
 	scope := "repo"
 	if t.IsOrg {
 		scope = "admin:org"
@@ -381,7 +381,7 @@ func handleScope(t ghc.Target, cause error) error {
 	refresh := false
 	if err := huh.NewForm(huh.NewGroup(
 		huh.NewConfirm().Title("Grant the missing scope now via gh auth refresh -s " + scope + "?").Value(&refresh),
-	)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+	)).WithTheme(huh.ThemeFunc(huh.ThemeCharm)).Run(); err != nil {
 		return err
 	}
 	if !refresh {
