@@ -89,8 +89,8 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   cannot be admitted for isolated PR lanes. The value versions the contract; bump it only
   when the supervisor admission contract changes incompatibly.
 * **Public repository boundary**: Image publication runs on fixed GitHub-hosted
-  capacity. This public repository does not require access to the persistent
-  Verjson GCP runner group.
+  capacity. This public repository does not require access to the shared persistent
+  Verjson runner group.
 * **Deployment**: Rollouts should consume the recorded digest, validate `ci` admission on
   the host, and retain the previous digest as the rollback target. Never broaden runner
   group access as part of an image rollout.
