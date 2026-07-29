@@ -57,7 +57,7 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 ### Infrastructure & Socket Isolation
 * **Docker Socket**: Do **not** mount `/var/run/docker.sock` on untrusted PR CI runners. Mounting the Docker socket grants root-equivalent access to the host node.
 * **Instance Metadata (IMDS)**: On cloud VMs (GCP / AWS / Azure), block or restrict access to metadata servers (e.g., set IMDSv2 hop limit to `1` on AWS or restrict GCP metadata server endpoints) to prevent containerized jobs from reading VM service account tokens.
-* **Isolated GCP admission**: Advertising `untrusted-pr` fails closed unless the immutable image is digest-pinned, the group is non-Default, all canonical isolation labels are present, the socket is disabled, and a dedicated child network plus `RUNNER_METADATA_DENY_ATTEST_CMD` attest metadata denial. The controller retains host metadata access for token minting; only the child is attached to the deny network.
+* **Isolated-lane admission**: Advertising `untrusted-pr` fails closed unless the immutable image is digest-pinned, the group is non-Default, all canonical isolation labels are present, the socket is disabled, and a dedicated child network plus `RUNNER_METADATA_DENY_ATTEST_CMD` attest metadata denial. The controller retains host metadata access for token minting; only the child is attached to the deny network.
 * **Network Egress**: Restrict outbound container networking to required endpoints (GitHub API, package registries) via firewall rules or proxy filters.
 
 ### Fail-Closed `ci` Capability Admission

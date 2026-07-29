@@ -672,9 +672,9 @@ echo "Test 23: ephemeral supervisor child lifecycle"
 )
 
 # -----------------------------------------------------------------------------
-# Test 24: isolated GCP contract is admitted and preserved
+# Test 24: isolated-lane contract is admitted and preserved
 # -----------------------------------------------------------------------------
-echo "Test 24: isolated GCP launch contract"
+echo "Test 24: isolated-lane launch contract"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   docker_log="${TMP_DIR}/isolated_docker.log"
@@ -689,7 +689,7 @@ echo "Test 24: isolated GCP launch contract"
 
   GITHUB_URL="https://github.com/Verjson"
   RUNNER_TOKEN_CMD="printf one-shot"
-  RUNNER_NAME="isolated-gcp-1"
+  RUNNER_NAME="isolated-runner-1"
   RUNNER_LABELS="self-hosted,isolated,linux,x64,untrusted-pr,ephemeral,no-host-docker"
   RUNNER_GROUP="isolated-pr"
   RUNNER_IMAGE="ghcr.io/verjson/gha-runner@sha256:$(printf 'a%.0s' {1..64})"

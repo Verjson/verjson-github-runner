@@ -52,6 +52,8 @@ Tequity. CI builds one shared artifact and pushes it to
    requires an existing, explicitly named non-`Default` runner group with public
    repositories disabled and access restricted to selected trusted private
    repositories and workflows; the CLI does not create or widen that access.
+   `<lane>` is the CLI's lane argument (see [Lane labels](#lane-labels-name-a-capability-never-a-provider));
+   the two host platforms below are *where* a lane runs, not lanes themselves.
    - **GCP** uses self-healing Spot MIG VMs and one-job ephemeral containers. Each
      container start mints a fresh registration token from the host's GitHub App
      integration.
@@ -100,17 +102,12 @@ runner-group repository allowlist.
 
 ### Lane labels name a capability, never a provider
 
-A runner's **lane** is the trust-and-lifecycle pool it belongs to. Two lanes exist, and a
-runner carries exactly one of them:
+A runner's **lane** is the trust-and-lifecycle pool it serves. Two lanes exist:
 
-| Lane | Lifecycle | Carried with | Runs |
-|------|-----------|--------------|------|
-| `general` | shared, persistent registration | `linux`, `x64`, and any kind labels | trusted workloads (push, internal PRs) |
-| `isolated` | one job per container, then discarded | `untrusted-pr`, `ephemeral`, `no-host-docker` | untrusted PR code from forks |
-
-The `isolated` companion labels are load-bearing security properties enforced at admission
-(see [`SECURITY.md`](SECURITY.md)), not descriptions — carry all three or the runner fails
-closed.
+| Lane | Lifecycle | Runs |
+|------|-----------|------|
+| `general` | shared, persistent registration | trusted workloads (push, internal PRs) |
+| `isolated` | one job per container, then discarded | untrusted PR code from forks |
 
 Provider and host names — `GCP`, `gce`, a droplet name, a hostname — are **not** lane
 labels. A runner keeps its lane label when its host moves between clouds, so migrating the
@@ -118,7 +115,23 @@ shared pool from one provider to another is a provisioning change, not a `runs-o
 in every consuming repository. Kind labels (`rust`, `node`, `python`, `go`) and the `ci`
 contract label compose on top of a lane label rather than replacing it.
 
-Refs: [`Verjson/.github` ADR 0033](https://github.com/Verjson/.github), [#80](https://github.com/Verjson/verjson-github-runner/issues/80).
+**What this image does and does not enforce.** A lane label is a routing convention that
+whatever provisions the runner attaches; the images here do not add one. `entrypoint.sh`
+defaults `RUNNER_LABELS` to `self-hosted,linux,x64,docker`, and `setup.sh` prompts with the
+same set — neither carries a lane, so the local and compose paths below are unlaned today.
+
+The `isolated` lane is the exception, and `untrusted-pr` is what opts a runner into it.
+When `RUNNER_LABELS` contains `untrusted-pr`, the supervisor (`entrypoint.sh supervise`)
+runs a fail-closed contract check before starting any job container: the labels must also
+include `self-hosted`, `isolated`, `linux`, `x64`, `ephemeral`, and `no-host-docker`, and
+the runner group must be non-`Default`, `RUNNER_IMAGE` digest-pinned, the host socket
+disabled, the child network dedicated, and metadata denial attested — see
+[`SECURITY.md`](SECURITY.md) for each requirement. Two consequences worth stating plainly:
+the check does not run at all without `untrusted-pr` (so that label is the trigger, not one
+of several interchangeable requirements), and it does not run on the ordinary
+non-supervisor registration path.
+
+Refs: [`Verjson/.github` ADR 0033](https://github.com/Verjson/.github/tree/main/docs/decisions), [#80](https://github.com/Verjson/verjson-github-runner/issues/80).
 
 ## The `gha` manager — TUI (recommended)
 
