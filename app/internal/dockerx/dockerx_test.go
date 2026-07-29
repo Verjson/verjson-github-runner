@@ -1,10 +1,13 @@
 package dockerx
 
 import (
+	"errors"
 	"os"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestParseJob(t *testing.T) {
@@ -87,5 +90,39 @@ func TestPATTransportRejectsReplay(t *testing.T) {
 	}
 	if err := deliverPAT(path, "secret"); err == nil {
 		t.Fatal("delivery unexpectedly replayed after transport destruction")
+	}
+}
+
+func TestDeliverPATReportsReaderTimeout(t *testing.T) {
+	path := t.TempDir() + "/github-pat"
+	if err := makePATFIFO(path); err != nil {
+		t.Fatal(err)
+	}
+
+	err := deliverPATWithin(path, "secret", 0, 0, func(time.Duration) {
+		t.Fatal("timeout attempt unexpectedly retried")
+	})
+
+	if !errors.Is(err, ErrPATDeliveryTimeout) {
+		t.Fatalf("deliverPATWithin() error = %v, want ErrPATDeliveryTimeout", err)
+	}
+	if !errors.Is(err, syscall.ENXIO) {
+		t.Fatalf("deliverPATWithin() error = %v, want wrapped ENXIO", err)
+	}
+	if !strings.Contains(err.Error(), "reader did not open FIFO") {
+		t.Fatalf("deliverPATWithin() error = %q, want clear reader diagnostic", err)
+	}
+}
+
+func TestDeliverPATImmediatelyPropagatesNonENXIOFailure(t *testing.T) {
+	err := deliverPATWithin(t.TempDir()+"/missing", "secret", time.Hour, time.Hour, func(time.Duration) {
+		t.Fatal("non-ENXIO failure unexpectedly retried")
+	})
+
+	if !errors.Is(err, syscall.ENOENT) {
+		t.Fatalf("deliverPATWithin() error = %v, want ENOENT", err)
+	}
+	if errors.Is(err, ErrPATDeliveryTimeout) {
+		t.Fatalf("deliverPATWithin() error = %v, unexpectedly reported timeout", err)
 	}
 }
