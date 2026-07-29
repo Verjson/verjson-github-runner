@@ -13,6 +13,13 @@ on:
       - images/**
       - entrypoint.sh
       - .github/workflows/image-build-check.yml
+  # The PR leg is amd64 only, so arm64-specific breakage — a stale GH_SHA256_ARM64 or
+  # NODE_SHA256_ARM64 after an upstream re-release, an arm64-only package gap — still
+  # reaches main unseen. The arm64 build is emulated and slow, too slow to put in front
+  # of every PR, so it runs on a schedule and on demand instead.
+  schedule:
+    - cron: '23 7 * * 1' # Mondays 07:23 UTC — off the top of the hour, off working hours
+  workflow_dispatch:
 
 concurrency:
   group: image-build-check-${{ github.ref }}
@@ -22,7 +29,11 @@ permissions:
   contents: read
 
 jobs:
+  # The amd64 legs answer "did this PR break the build?", so they stay on pull_request only:
+  # on a schedule they would re-prove what publish-images.yml already builds natively on
+  # every push to main, and the cron exists purely for the arm64 gap below.
   base-and-kinds:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -48,6 +59,7 @@ jobs:
           done
 
   root:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -56,3 +68,20 @@ jobs:
       # so it can break on its own and is built in parallel.
       - name: Build root Dockerfile
         run: docker build --platform linux/amd64 -f Dockerfile -t gha-runner:pr-check-root .
+
+  # Weekly/on-demand arm64 build of the base image only. Everything arch-specific lives in
+  # images/base.Dockerfile (the per-arch gh and Node checksums); the kind images add no
+  # per-arch pins of their own, so building the base is what closes the gap, and skipping
+  # the kinds keeps an emulated run to one image. Build-only, nothing pushed.
+  base-arm64:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Same QEMU pin as publish-images.yml, which is where the arm64 build otherwise runs.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+      - name: Build base image for arm64 under emulation
+        run: |
+          docker build --platform linux/arm64 \
+            -f images/base.Dockerfile -t gha-runner:cron-check-base-arm64 .
