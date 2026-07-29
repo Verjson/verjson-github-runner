@@ -1,0 +1,58 @@
+name: image build check
+
+# publish-images.yml pushes :base/:latest to GHCR the moment a change lands on main, so a
+# broken image change (bad base codename, renamed apt package, checksum drift) is only
+# discovered once it is already the tag hosts pull. This builds the images on the pull
+# request instead. Build-only: nothing is pushed, so no registry credential is needed and
+# no tag is touched.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - images/**
+      - entrypoint.sh
+      - .github/workflows/image-build-check.yml
+
+concurrency:
+  group: image-build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  base-and-kinds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Plain `docker build` rather than docker/build-push-action: it uses the default
+      # buildx builder, which writes results into the local daemon image store, so the
+      # kind images below resolve `FROM gha-runner:pr-check-base` with no registry in
+      # the loop. amd64 only — a PR check catches source breakage, not arch drift; the
+      # multi-arch build stays in publish-images.yml.
+      - name: Build base image
+        run: |
+          docker build --platform linux/amd64 \
+            -f images/base.Dockerfile -t gha-runner:pr-check-base .
+      # Kinds are built on the base from this same commit, matching how publish-images.yml
+      # wires BASE_IMAGE, so a base change that breaks a kind fails here too.
+      - name: Build kind images on the just-built base
+        run: |
+          for kind in rust node python go; do
+            docker build --platform linux/amd64 \
+              -f "images/${kind}.Dockerfile" \
+              --build-arg "BASE_IMAGE=gha-runner:pr-check-base" \
+              -t "gha-runner:pr-check-${kind}" .
+          done
+
+  root:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The root Dockerfile has its own FROM and pins, independent of images/base.Dockerfile,
+      # so it can break on its own and is built in parallel.
+      - name: Build root Dockerfile
+        run: docker build --platform linux/amd64 -f Dockerfile -t gha-runner:pr-check-root .
