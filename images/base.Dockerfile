@@ -4,6 +4,10 @@
 #   docker build -f images/base.Dockerfile -t gha-runner:base .
 FROM ubuntu:26.04
 
+# Consumers (cli-cloud runner-image-contract) key isolated-mode admission on this label;
+# it versions the supervisor admission contract, so bump it only on an incompatible change.
+LABEL com.verjson.gha-runner.isolation-supervisor="1"
+
 ARG RUNNER_VERSION=2.335.1
 ARG GH_VERSION=2.96.0
 ARG GH_SHA256_AMD64=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
