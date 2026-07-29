@@ -5,6 +5,8 @@
 - Report a typed, actionable timeout when PAT delivery cannot open its FIFO
   because no reader connects before the deadline, while preserving the
   underlying system error for diagnosis (#53).
+- Report dashboard restart failures with actionable relaunch-via-setup guidance
+  while preserving the runner refresh after a successful restart (#54).
 
 ## 2026-07-28
 
