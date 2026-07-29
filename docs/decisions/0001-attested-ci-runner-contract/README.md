@@ -51,3 +51,27 @@ that rollout remains tracked by
 - **A caller-controlled admission bypass** would make the `ci` label untrustworthy.
 - **Mutable tags without attestations or receipts** would not identify the artifact that
   was validated or provide a durable audit trail.
+
+## Amendments
+
+The decision above is left as it was accepted. Later changes to the admitted tool matrix
+are recorded here instead of being edited into the original text.
+
+### 2026-07-29 — admitted matrix extended; base moved to Ubuntu 26.04
+
+- The admitted tool matrix gained `unzip` and `python3`. Actions in common use unpack
+  zip artifacts and shell out to Python, so a runner missing either could take a `ci`
+  job it could not finish
+  ([#60](https://github.com/Verjson/verjson-github-runner/pull/60),
+  [#74](https://github.com/Verjson/verjson-github-runner/pull/74),
+  issue [#72](https://github.com/Verjson/verjson-github-runner/issues/72)).
+- The base image moved to Ubuntu 26.04
+  ([#68](https://github.com/Verjson/verjson-github-runner/pull/68)). Ubuntu 26.04 ships
+  uutils coreutils in place of GNU coreutils, so the coreutils-provided entries in the
+  matrix (`base64` and friends) are now satisfied by uutils implementations. Admission
+  checks probe the tool, not its provenance, so a uutils tool that answers `--version`
+  admits the runner; behavioural differences between the two implementations are a
+  workload concern, not an admission one.
+
+`attest_ci_runner()` in `entrypoint.sh` is the normative matrix. Where this document and
+that function disagree, the function wins, and the disagreement is a bug in this document.
