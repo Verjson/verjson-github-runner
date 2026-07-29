@@ -80,6 +80,14 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 * **Published images**: BuildKit publishes SBOM and provenance attestations for the shared
   multi-architecture base and kind images. The workflow retains a receipt binding each
   commit-addressed tag to its immutable manifest digest.
+* **Isolation-supervisor contract label**: The base image — and therefore every kind image
+  built `FROM` it — carries the OCI config label
+  `com.verjson.gha-runner.isolation-supervisor="1"`, which declares that the entrypoint
+  implements the one-job supervisor contract. Isolated-mode consumers
+  (`@verjson/cli-cloud`'s runner-image-contract step) read the label off the image config
+  and fail closed on a missing or unrecognized value, so an image predating the supervisor
+  cannot be admitted for isolated PR lanes. The value versions the contract; bump it only
+  when the supervisor admission contract changes incompatibly.
 * **Public repository boundary**: Image publication runs on fixed GitHub-hosted
   capacity. This public repository does not require access to the persistent
   Verjson GCP runner group.
