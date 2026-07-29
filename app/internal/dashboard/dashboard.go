@@ -29,6 +29,15 @@ var (
 
 type tickMsg time.Time
 type dataMsg []dockerx.Runner
+type restartMsg struct {
+	name string
+	err  error
+}
+
+var (
+	restartRunner  = dockerx.Restart
+	snapshotRunner = dockerx.Snapshot
+)
 
 type model struct {
 	runners  []dockerx.Runner
@@ -54,7 +63,7 @@ func (m model) Init() tea.Cmd {
 
 func fetch() tea.Cmd {
 	return func() tea.Msg {
-		rs, _ := dockerx.Snapshot()
+		rs, _ := snapshotRunner()
 		return dataMsg(rs)
 	}
 }
@@ -77,6 +86,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		return m, tea.Batch(fetch(), tick())
+	case restartMsg:
+		m.status = fmt.Sprintf("restart unavailable for %s: %v; relaunch via setup to create fresh credentials", msg.name, msg.err)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -130,7 +141,12 @@ func (m model) current() (dockerx.Runner, bool) {
 }
 
 func restart(name string) tea.Cmd {
-	return func() tea.Msg { _ = dockerx.Restart(name); return fetch()() }
+	return func() tea.Msg {
+		if err := restartRunner(name); err != nil {
+			return restartMsg{name: name, err: err}
+		}
+		return fetch()()
+	}
 }
 func remove(name string) tea.Cmd {
 	return func() tea.Msg { _ = dockerx.Remove(name); return fetch()() }
