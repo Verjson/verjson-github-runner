@@ -2,7 +2,7 @@
 # Every language "kind" (rust/node/python/go) builds FROM this via images/<kind>.Dockerfile.
 # Build from the repo root so entrypoint.sh is in the build context:
 #   docker build -f images/base.Dockerfile -t gha-runner:base .
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ARG RUNNER_VERSION=2.335.1
 ARG GH_VERSION=2.96.0
