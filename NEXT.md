@@ -2,6 +2,9 @@
 
 ## 2026-07-29
 
+- Keep the SIGTERM integration check running through expected supervisor
+  termination so it can verify child-container cleanup, while rejecting
+  unexpected supervisor exit statuses (#56).
 - Report a typed, actionable timeout when PAT delivery cannot open its FIFO
   because no reader connects before the deadline, while preserving the
   underlying system error for diagnosis (#53).
