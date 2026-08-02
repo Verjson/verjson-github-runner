@@ -1,4 +1,8 @@
-# Document `general` as the provider-neutral lane label — 2026-07-29
+---
+date: 2026-07-29
+id: d333a3f
+title: Document `general` as the provider-neutral lane label
+---
 
 The runner docs described kind labels (`rust`, `node`, …) and the `ci` contract, but never
 the lane axis, so the shared persistent pool was reachable only through provider-named

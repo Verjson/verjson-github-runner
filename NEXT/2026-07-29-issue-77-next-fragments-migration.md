@@ -1,4 +1,8 @@
-# Migrate the running log to per-entry fragments — 2026-07-29
+---
+date: 2026-07-29
+issue: 77
+title: Migrate the running log to per-entry fragments
+---
 
 Split the prepend-only `NEXT.md` into one file per entry under `NEXT/`, rendered
 newest-first by `scripts/render-next.sh`, matching the org reference shape in

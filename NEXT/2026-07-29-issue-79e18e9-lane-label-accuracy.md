@@ -1,4 +1,8 @@
-# Correct what the lane-label docs claim this image enforces — 2026-07-29
+---
+date: 2026-07-29
+id: 79e18e9
+title: Correct what the lane-label docs claim this image enforces
+---
 
 The lane-label section added earlier today overstated the code in three ways, each of which
 would have misled an operator provisioning an isolated runner. It said the three `isolated`

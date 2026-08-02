@@ -1,4 +1,8 @@
-# Make `RUNNER_EPHEMERAL` a tested lifecycle — 2026-07-28
+---
+date: 2026-07-28
+issue: 33
+title: Make `RUNNER_EPHEMERAL` a tested lifecycle
+---
 
 Make `RUNNER_EPHEMERAL` a tested fresh-container lifecycle: `gha` now
 supervises one-job `--rm` children, rejects ambiguous booleans and one-shot

@@ -1,4 +1,8 @@
-# PowerShell runner variant, as a separate tag — 2026-07-29
+---
+date: 2026-07-29
+issue: 88
+title: PowerShell runner variant, as a separate tag
+---
 
 `verjson-agents` ships two installers but only the bash suite runs in CI: no available
 runner can execute `tests/install.test.ps1`, so a test in it stayed silently broken for

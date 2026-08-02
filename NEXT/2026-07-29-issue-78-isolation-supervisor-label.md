@@ -1,4 +1,8 @@
-# Stamp the isolation-supervisor contract label on the base image — 2026-07-29
+---
+date: 2026-07-29
+issue: 78
+title: Stamp the isolation-supervisor contract label on the base image
+---
 
 `images/base.Dockerfile` now sets the OCI config label
 `com.verjson.gha-runner.isolation-supervisor="1"`, and every kind image inherits it via

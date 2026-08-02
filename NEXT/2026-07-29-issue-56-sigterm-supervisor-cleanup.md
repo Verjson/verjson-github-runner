@@ -1,4 +1,8 @@
-# Verify supervisor cleanup after expected SIGTERM — 2026-07-29
+---
+date: 2026-07-29
+issue: 56
+title: Verify supervisor cleanup after expected SIGTERM
+---
 
 Keep the SIGTERM integration check running through expected supervisor
 termination so it can verify child-container cleanup, while rejecting
