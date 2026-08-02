@@ -1,0 +1,13 @@
+name: changelog
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    uses: Verjson/.github/.github/workflows/changelog-validate.yml@1486d44db0668d61354815c12bdbfc9d53fbeca4
+    with:
+      contract_ref: 1486d44db0668d61354815c12bdbfc9d53fbeca4

@@ -1,4 +1,8 @@
-# Report PAT FIFO reader timeouts — 2026-07-29
+---
+date: 2026-07-29
+issue: 53
+title: Report PAT FIFO reader timeouts
+---
 
 Report a typed, actionable timeout when PAT delivery cannot open its FIFO
 because no reader connects before the deadline, while preserving the

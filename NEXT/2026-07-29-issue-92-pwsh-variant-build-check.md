@@ -1,4 +1,8 @@
-# Build the pwsh variant in the PR image check — 2026-07-29
+---
+date: 2026-07-29
+issue: 92
+title: Build the pwsh variant in the PR image check
+---
 
 `.github/workflows/image-build-check.yml` now builds `Dockerfile.pwsh` on the root image
 built earlier in the same job, and `Dockerfile.pwsh` joins the workflow's `paths:` filter.

@@ -1,4 +1,8 @@
-# Build the runner images on pull requests — 2026-07-29
+---
+date: 2026-07-29
+issue: 79
+title: Build the runner images on pull requests
+---
 
 New workflow `.github/workflows/image-build-check.yml` builds `images/base.Dockerfile`,
 the four kind images, and the root `Dockerfile` on `pull_request`, amd64 only and

@@ -1,4 +1,8 @@
-# Amend ADR-0001 with the current admitted tool matrix — 2026-07-29
+---
+date: 2026-07-29
+issue: 75
+title: Amend ADR-0001 with the current admitted tool matrix
+---
 
 ADR-0001 still enumerated the pre-`unzip`/`python3` tool list, so the accepted decision
 text trailed the contract `entrypoint.sh` actually enforces. Rather than rewrite a decided

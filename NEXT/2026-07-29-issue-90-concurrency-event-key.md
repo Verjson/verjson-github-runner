@@ -1,4 +1,8 @@
-# Key the image build check concurrency group on the event — 2026-07-29
+---
+date: 2026-07-29
+issue: 90
+title: Key the image build check concurrency group on the event
+---
 
 `.github/workflows/image-build-check.yml` grouped its concurrent runs by `github.ref`
 only. Pull requests each have their own ref, but `schedule` and `workflow_dispatch` both

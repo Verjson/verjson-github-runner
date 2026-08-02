@@ -1,4 +1,8 @@
-# Correct the README's account of the root Dockerfile — 2026-07-29
+---
+date: 2026-07-29
+issue: 93
+title: Correct the README's account of the root Dockerfile
+---
 
 The README called the root `Dockerfile` a pre-`images/` leftover kept only for backward
 compat, which invited operators to dismiss the file their own hosts run: `setup.sh` and

@@ -1,4 +1,8 @@
-# Catch arm64 image breakage on a schedule, not on main — 2026-07-29
+---
+date: 2026-07-29
+issue: 87
+title: Catch arm64 image breakage on a schedule, not on main
+---
 
 `image-build-check.yml` builds amd64 only, so the arch-specific half of
 `images/base.Dockerfile` — the per-arch `GH_SHA256_ARM64` / `NODE_SHA256_ARM64` pins — was

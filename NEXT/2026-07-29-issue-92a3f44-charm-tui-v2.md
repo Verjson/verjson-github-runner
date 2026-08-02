@@ -1,4 +1,8 @@
-# Migrate the Charm TUI stack to v2 — 2026-07-29
+---
+date: 2026-07-29
+id: 92a3f44
+title: Migrate the Charm TUI stack to v2
+---
 
 Migrate the Charm TUI stack (bubbletea, huh, lipgloss) to v2 in one change,
 since the three majors share the `charmbracelet/x/*` support modules and
