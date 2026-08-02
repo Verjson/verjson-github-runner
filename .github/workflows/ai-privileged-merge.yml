@@ -1,0 +1,50 @@
+# GENERATED FILE — do not edit by hand.
+# Regenerate with:
+#   scripts/gen-privileged-merge-caller.sh '["self-hosted","general"]' > .github/workflows/ai-privileged-merge.yml
+#
+# Thin caller for the canonical privileged merge (Verjson/.github). All trust
+# logic lives there; nothing here may re-implement it.
+name: AI privileged merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      expected_head_sha:
+        required: true
+        type: string
+      source_run_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Deliberately NOT the canonical workflow's group name, and keyed by event so
+# the dispatched continuation cannot cancel the pull_request_target check and
+# leave a red mark on a merged PR (ADR 0039).
+concurrency:
+  group: ai-privileged-merge-call-${{ github.event.pull_request.number || inputs.pr_number }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # The job key is CONTRACTUAL: the published check name is
+  # "<caller job> / <callee job>" and both workflows exclude that shape.
+  # Renaming it makes the gate wait on its own continuation.
+  privileged_merge:
+    uses: Verjson/.github/.github/workflows/ai-privileged-merge.yml@main
+    # Explicit rather than `inherit`: the caller grants exactly one secret
+    # instead of its entire store to a workflow that floats on @main.
+    secrets:
+      ORG_ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+    with:
+      pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
+      # The event value MUST win here: on pull_request_target it is the
+      # anti-TOCTOU binding to the head the gate actually attested.
+      expected_head_sha: ${{ github.event.pull_request.head.sha || inputs.expected_head_sha }}
+      source_run_id: ${{ inputs.source_run_id }}
+      runner_labels: '["self-hosted","general"]'
