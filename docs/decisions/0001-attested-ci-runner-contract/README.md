@@ -73,5 +73,26 @@ are recorded here instead of being edited into the original text.
   admits the runner; behavioural differences between the two implementations are a
   workload concern, not an admission one.
 
+### 2026-08-04 — organization toolchain and PowerShell variant attested
+
+- The base image and normative `ci` admission matrix gained `diff`/`cmp`, PyYAML,
+  ShellCheck, and zstd. Admission now also enforces the material runtime floors consumed
+  by organization workflows: Node.js >=24.10, Python >=3.10, Bash >=4.3, and jq >=1.6
+  ([issue #111](https://github.com/Verjson/verjson-github-runner/issues/111)). Tools that
+  workflows provision for themselves, including Helm, actionlint, Pulumi, and Claude,
+  remain outside the image contract.
+- A multi-architecture PowerShell variant is now published from the same attested base
+  with immutable digest receipts, SBOM, and provenance. PowerShell remains a separate
+  capability rather than widening `ci`: advertising the exact case-insensitive `pwsh`
+  label requires `pwsh --version` before token minting or registration.
+- Published variants bind `FROM` to the exact base manifest digest produced by the base
+  job rather than its commit-addressed tag. Before every token mint, ephemeral supervisors
+  run the candidate image under the planned child's environment, network, and socket
+  mounts while retaining child-side `ci` and `pwsh` checks.
+- Default labels derive the canonical architecture capability from the runtime (`x64` or
+  `ARM64`) in both shell and PowerShell launchers; explicit labels remain
+  operator-controlled. Version admission accepts only stable numeric releases, so
+  malformed and prerelease output fails closed.
+
 `attest_ci_runner()` in `entrypoint.sh` is the normative matrix. Where this document and
 that function disagree, the function wins, and the disagreement is a bug in this document.

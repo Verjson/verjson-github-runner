@@ -12,6 +12,12 @@ IMAGE="gha-runner:local"
 transport_dir=""
 delivery_container=""
 
+case "$(uname -m)" in
+  x86_64|amd64) ARCH_LABEL="x64" ;;
+  aarch64|arm64) ARCH_LABEL="ARM64" ;;
+  *) echo "Unsupported runner architecture: $(uname -m)." >&2; exit 1 ;;
+esac
+
 cleanup_transport() {
   [[ -z "${delivery_container}" ]] || docker rm -f "${delivery_container}" >/dev/null 2>&1 || true
   [[ -z "${transport_dir}" ]] || rm -rf "${transport_dir}"
@@ -30,7 +36,7 @@ read -rsp "GitHub PAT (input hidden): " GITHUB_PAT; echo
 [ -z "$GITHUB_PAT" ] && { echo "A PAT is required (org: admin:org  /  repo: repo)."; exit 1; }
 
 NAMES_INPUT="$(ask 'Runner name(s), comma-separated' 'ci-runner-01')"
-LABELS="$(ask 'Labels (comma-separated)' 'self-hosted,linux,x64,docker')"
+LABELS="$(ask 'Labels (comma-separated)' "self-hosted,linux,${ARCH_LABEL},docker")"
 RUNNER_GROUP="$(ask 'Runner group (org runners only; Default for repo)' 'Default')"
 RUNNER_WORKDIR="$(ask 'Work folder' '_work')"
 

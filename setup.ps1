@@ -8,6 +8,13 @@ Set-Location $PSScriptRoot
 
 $image = "gha-runner:local"
 
+switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
+    "X64" { $archLabel = "x64" }
+    "Arm64" { $archLabel = "ARM64" }
+    default { throw "Unsupported runner architecture: $_" }
+}
+$defaultLabels = "self-hosted,linux,$archLabel,docker"
+
 function Read-Default($prompt, $default) {
     $v = Read-Host "$prompt [$default]"
     if ([string]::IsNullOrWhiteSpace($v)) { return $default } else { return $v }
@@ -28,7 +35,7 @@ try {
 if ([string]::IsNullOrWhiteSpace($GITHUB_PAT)) { throw "A PAT is required (org: admin:org / repo: repo)." }
 
 $namesInput   = Read-Default "Runner name(s), comma-separated" "ci-runner-01"
-$labels       = Read-Default "Labels (comma-separated)" "self-hosted,linux,x64,docker"
+$labels       = Read-Default "Labels (comma-separated)" $defaultLabels
 $runnerGroup  = Read-Default "Runner group (org runners only; Default for repo)" "Default"
 $runnerWork   = Read-Default "Work folder" "_work"
 

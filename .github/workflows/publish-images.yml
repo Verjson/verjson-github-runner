@@ -26,6 +26,8 @@ jobs:
     # This repository is public. Even trusted main/tag publication stays off the
     # persistent organization runner group so public access can be denied there.
     runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
@@ -78,7 +80,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: [rust, node, python, go]
+        include:
+          - kind: rust
+            dockerfile: images/rust.Dockerfile
+          - kind: node
+            dockerfile: images/node.Dockerfile
+          - kind: python
+            dockerfile: images/python.Dockerfile
+          - kind: go
+            dockerfile: images/go.Dockerfile
+          - kind: pwsh
+            dockerfile: Dockerfile.pwsh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
@@ -92,13 +104,13 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
-          file: images/${{ matrix.kind }}.Dockerfile
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ env.PLATFORMS }}
           push: true
-          # Kinds build FROM the base we just pushed; use the commit-addressed sha tag so a
-          # kind is always built on the exact base from the same commit.
+          # Bind every variant to the exact multi-arch base manifest produced above. A tag,
+          # even a commit-addressed one, remains mutable in the registry.
           build-args: |
-            BASE_IMAGE=${{ env.IMAGE }}:base-${{ github.sha }}
+            BASE_IMAGE=${{ env.IMAGE }}@${{ needs.base.outputs.digest }}
           tags: |
             ${{ env.IMAGE }}:${{ matrix.kind }}-${{ github.sha }}
             ${{ env.IMAGE }}:${{ matrix.kind }}
