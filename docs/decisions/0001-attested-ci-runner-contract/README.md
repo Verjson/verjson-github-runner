@@ -105,9 +105,17 @@ are recorded here instead of being edited into the original text.
   digest receipts remain workflow artifacts. These records are complementary: GitHub
   artifact attestations make the publisher identity verifiable by the deployment gate,
   while BuildKit records build details and receipts preserve the release handoff.
-- A deployment must bind verification to this repository and publication workflow:
-  `gh attestation verify oci://ghcr.io/verjson/gha-runner@<digest> --repo Verjson/verjson-github-runner --signer-workflow .github/workflows/publish-images.yml`.
-  Verification failure remains a fail-closed rollout condition.
+- Privileged publication runs only for pushes to `main` and protected `v*` release tags;
+  it cannot be dispatched against a caller-selected branch. A main deployment must bind
+  verification to the complete workflow identity and protected source ref:
+  `gh attestation verify oci://ghcr.io/verjson/gha-runner@<digest> --repo Verjson/verjson-github-runner --signer-workflow Verjson/verjson-github-runner/.github/workflows/publish-images.yml --source-ref refs/heads/main`.
+  A release deployment must instead supply the exact tag source ref, for example
+  `--source-ref refs/tags/v1.2.3`; a wildcard tag ref is not sufficient.
+- The released updater does not yet enforce the signer workflow or source ref. That defect
+  is tracked by
+  [Verjson/verjson-cli-cloud#225](https://github.com/Verjson/verjson-cli-cloud/issues/225),
+  and unattended rollout must remain blocked until the updater is corrected. Verification
+  failure remains a fail-closed rollout condition.
 
 `attest_ci_runner()` in `entrypoint.sh` is the normative matrix. Where this document and
 that function disagree, the function wins, and the disagreement is a bug in this document.

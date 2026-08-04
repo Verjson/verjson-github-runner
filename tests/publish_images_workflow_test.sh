@@ -23,6 +23,15 @@ assert_count() {
 [[ -f "${workflow}" ]] || fail "workflow not found: ${workflow}"
 workflow_text="$(<"${workflow}")"
 
+triggers="$(awk '
+  /^on:$/ { capture = 1; next }
+  capture && /^[^ ]/ { exit }
+  capture { print }
+' "${workflow}")"
+expected_triggers=$'  push:\n    branches: [main]\n    tags: ['\''v*'\'']'
+[[ "${triggers}" == "${expected_triggers}" ]] \
+  || fail "publication must run only for main pushes and protected release tags"
+
 permissions="$(awk '
   /^permissions:$/ { capture = 1; next }
   capture && /^[^ ]/ { exit }
