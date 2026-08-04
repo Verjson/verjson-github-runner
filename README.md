@@ -32,7 +32,6 @@ Tequity. CI builds one shared artifact and pushes it to
 | `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, organization CI tools, non-root) |
 | `:rust` `:node` `:python` `:go` | base + that language toolchain |
 | `:pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
-| `:base-<version>` (e.g. `:base-v0.1.0`) | pinned release, `FROM` a tagged release |
 | `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
 
 - **Multi-arch:** published tags are `amd64` + `arm64`.

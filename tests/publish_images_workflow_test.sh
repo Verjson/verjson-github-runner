@@ -28,9 +28,10 @@ triggers="$(awk '
   capture && /^[^ ]/ { exit }
   capture { print }
 ' "${workflow}")"
-expected_triggers=$'  push:\n    branches: [main]\n    tags: ['\''v*'\'']'
+expected_triggers=$'  push:\n    branches: [main]'
 [[ "${triggers}" == "${expected_triggers}" ]] \
-  || fail "publication must run only for main pushes and protected release tags"
+  || fail "publication must run only for pushes to main"
+assert_count 0 'refs/tags/'
 
 permissions="$(awk '
   /^permissions:$/ { capture = 1; next }
