@@ -94,5 +94,26 @@ are recorded here instead of being edited into the original text.
   operator-controlled. Version admission accepts only stable numeric releases, so
   malformed and prerelease output fails closed.
 
+### 2026-08-04 — published digests gain GitHub artifact attestations
+
+- The trusted publication workflow creates a GitHub artifact build provenance
+  attestation for the base digest and every kind digest after each multi-architecture
+  image is pushed ([issue #113](https://github.com/Verjson/verjson-github-runner/issues/113)).
+  It publishes each attestation to GitHub's attestation store and GHCR, using only the
+  workflow's short-lived OIDC identity and the repository-scoped `GITHUB_TOKEN`.
+- BuildKit's maximal provenance and SBOM attestations remain enabled, and immutable
+  digest receipts remain workflow artifacts. These records are complementary: GitHub
+  artifact attestations make the publisher identity verifiable by the deployment gate,
+  while BuildKit records build details and receipts preserve the release handoff.
+- Privileged publication runs only for pushes to `main`; tags and caller-selected
+  branches cannot trigger it. Every deployment must bind verification to the complete
+  workflow identity and the sole trusted publication source ref:
+  `gh attestation verify oci://ghcr.io/verjson/gha-runner@<digest> --repo Verjson/verjson-github-runner --signer-workflow Verjson/verjson-github-runner/.github/workflows/publish-images.yml --source-ref refs/heads/main`.
+- The released updater does not yet enforce the signer workflow or source ref. That defect
+  is tracked by
+  [Verjson/verjson-cli-cloud#225](https://github.com/Verjson/verjson-cli-cloud/issues/225),
+  and unattended rollout must remain blocked until the updater is corrected. Verification
+  failure remains a fail-closed rollout condition.
+
 `attest_ci_runner()` in `entrypoint.sh` is the normative matrix. Where this document and
 that function disagree, the function wins, and the disagreement is a bug in this document.
