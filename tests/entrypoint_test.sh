@@ -77,6 +77,47 @@ assert_file_absent() {
   fi
 }
 
+mock_passing_ci_tools() {
+  gh() { echo "gh $*" >> "${command_log}"; }
+  docker() { echo "docker $*" >> "${command_log}"; }
+  node() {
+    echo "node $*" >> "${command_log}"
+    echo "v24.18.0"
+  }
+  npm() { echo "npm $*" >> "${command_log}"; }
+  jq() {
+    echo "jq $*" >> "${command_log}"
+    echo "jq-1.7"
+  }
+  git() { echo "git $*" >> "${command_log}"; }
+  bash() {
+    echo "bash $*" >> "${command_log}"
+    echo "GNU bash, version 5.2.15(1)-release"
+  }
+  curl() { echo "curl $*" >> "${command_log}"; }
+  grep() { echo "grep $*" >> "${command_log}"; }
+  sed() { echo "sed $*" >> "${command_log}"; }
+  awk() { echo "awk $*" >> "${command_log}"; }
+  find() { echo "find $*" >> "${command_log}"; }
+  base64() { echo "base64 $*" >> "${command_log}"; }
+  tar() { echo "tar $*" >> "${command_log}"; }
+  gzip() { echo "gzip $*" >> "${command_log}"; }
+  unzip() { echo "unzip $*" >> "${command_log}"; }
+  python3() {
+    echo "python3 $*" >> "${command_log}"
+    [[ "${1:-}" == "--version" ]] && echo "Python 3.13.5"
+    return 0
+  }
+  shellcheck() { echo "shellcheck $*" >> "${command_log}"; }
+  cmp() { echo "cmp $*" >> "${command_log}"; }
+  diff() { echo "diff $*" >> "${command_log}"; }
+  zstd() { echo "zstd $*" >> "${command_log}"; }
+}
+
+expected_ci_admission_commands() {
+  printf '%s' $'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version\npython3 -c import yaml\nshellcheck --version\ncmp /dev/null /dev/null\ndiff /dev/null /dev/null\nzstd --version'
+}
+
 # Mock api_base for tests
 api_base="https://api.github.com/repos/Verjson/test/actions/runners"
 
@@ -344,32 +385,11 @@ echo "Test 15: passing ci admission exercises the complete tool contract"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   command_log="${TMP_DIR}/admission_pass.log"
-
-  gh() { echo "gh $*" >> "${command_log}"; }
-  docker() { echo "docker $*" >> "${command_log}"; }
-  node() {
-    echo "node $*" >> "${command_log}"
-    echo "v24.18.0"
-  }
-  npm() { echo "npm $*" >> "${command_log}"; }
-  jq() { echo "jq $*" >> "${command_log}"; }
-  git() { echo "git $*" >> "${command_log}"; }
-  bash() { echo "bash $*" >> "${command_log}"; }
-  curl() { echo "curl $*" >> "${command_log}"; }
-  grep() { echo "grep $*" >> "${command_log}"; }
-  sed() { echo "sed $*" >> "${command_log}"; }
-  awk() { echo "awk $*" >> "${command_log}"; }
-  find() { echo "find $*" >> "${command_log}"; }
-  base64() { echo "base64 $*" >> "${command_log}"; }
-  tar() { echo "tar $*" >> "${command_log}"; }
-  gzip() { echo "gzip $*" >> "${command_log}"; }
-  unzip() { echo "unzip $*" >> "${command_log}"; }
-  python3() { echo "python3 $*" >> "${command_log}"; }
+  mock_passing_ci_tools
 
   attest_ci_runner >/dev/null
 
-  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version'
-  assert_eq "${expected_commands}" "$(< "${command_log}")" "Exercises every required ci capability"
+  assert_eq "$(expected_ci_admission_commands)" "$(< "${command_log}")" "Exercises every required ci capability"
 )
 
 # -----------------------------------------------------------------------------
@@ -379,17 +399,11 @@ echo "Test 16: failing ci admission stops at the failed capability"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   command_log="${TMP_DIR}/admission_fail.log"
-
-  gh() { echo "gh $*" >> "${command_log}"; }
+  mock_passing_ci_tools
   docker() {
     echo "docker $*" >> "${command_log}"
     [[ "$*" != "version" ]]
   }
-  node() { echo "node $*" >> "${command_log}"; }
-  npm() { echo "npm $*" >> "${command_log}"; }
-  jq() { echo "jq $*" >> "${command_log}"; }
-  git() { echo "git $*" >> "${command_log}"; }
-  bash() { echo "bash $*" >> "${command_log}"; }
 
   set +e
   output="$(attest_ci_runner 2>&1)"
@@ -402,20 +416,20 @@ echo "Test 16: failing ci admission stops at the failed capability"
 )
 
 # -----------------------------------------------------------------------------
-# Test 17: ci admission rejects the wrong Node.js major
+# Test 17: ci admission rejects Node.js below its runtime floor
 # -----------------------------------------------------------------------------
-echo "Test 17: ci admission rejects the wrong Node.js major"
+echo "Test 17: ci admission rejects Node.js below its runtime floor"
 (
   source "${REPO_ROOT}/entrypoint.sh"
-  node() { echo "v23.11.0"; }
+  node() { echo "v24.9.9"; }
 
   set +e
-  output="$(run_node_24_admission_check 2>&1)"
+  output="$(run_node_admission_check 2>&1)"
   status=$?
   set -e
 
-  assert_eq "1" "${status}" "Rejects Node.js outside major 24"
-  assert_contains "Node.js major 24 is required" "${output}" "Reports the required Node.js major"
+  assert_eq "1" "${status}" "Rejects Node.js below 24.10"
+  assert_contains "Node.js >= 24.10 is required" "${output}" "Reports the required Node.js floor"
 )
 
 # -----------------------------------------------------------------------------
@@ -509,27 +523,9 @@ echo "Test 20: standalone ci dispatches directly to admission"
   : > "${command_log}"
   export command_log
 
-  gh() { echo "gh $*" >> "${command_log}"; }
-  docker() { echo "docker $*" >> "${command_log}"; }
-  node() {
-    echo "node $*" >> "${command_log}"
-    echo "v24.18.0"
-  }
-  npm() { echo "npm $*" >> "${command_log}"; }
-  jq() { echo "jq $*" >> "${command_log}"; }
-  git() { echo "git $*" >> "${command_log}"; }
-  bash() { echo "bash $*" >> "${command_log}"; }
-  curl() { echo "curl $*" >> "${command_log}"; }
-  grep() { echo "grep $*" >> "${command_log}"; }
-  sed() { echo "sed $*" >> "${command_log}"; }
-  awk() { echo "awk $*" >> "${command_log}"; }
-  find() { echo "find $*" >> "${command_log}"; }
-  base64() { echo "base64 $*" >> "${command_log}"; }
-  tar() { echo "tar $*" >> "${command_log}"; }
-  gzip() { echo "gzip $*" >> "${command_log}"; }
-  unzip() { echo "unzip $*" >> "${command_log}"; }
-  python3() { echo "python3 $*" >> "${command_log}"; }
-  export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip unzip python3
+  mock_passing_ci_tools
+  export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip unzip
+  export -f python3 shellcheck cmp diff zstd
 
   cat << EOF > "${standalone_dir}/config.sh"
 #!/usr/bin/env bash
@@ -546,9 +542,8 @@ EOF
   status=$?
   set -e
 
-  expected_commands=$'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version'
   assert_eq "0" "${status}" "Standalone ci exits successfully without registration inputs"
-  assert_eq "${expected_commands}" "$(< "${command_log}")" "Dispatches directly to the complete ci attestation"
+  assert_eq "$(expected_ci_admission_commands)" "$(< "${command_log}")" "Dispatches directly to the complete ci attestation"
   assert_file_absent "${standalone_dir}/token_resolved" "Does not resolve a registration token"
   assert_file_absent "${standalone_dir}/config_called" "Does not invoke config.sh"
   assert_contains "CI runner admission passed." "${output}" "Reports successful standalone admission"
@@ -796,27 +791,7 @@ echo "Test 28: ci admission verifies zip archive extraction"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   command_log="${TMP_DIR}/admission_unzip.log"
-
-  gh() { echo "gh $*" >> "${command_log}"; }
-  docker() { echo "docker $*" >> "${command_log}"; }
-  node() {
-    echo "node $*" >> "${command_log}"
-    echo "v24.18.0"
-  }
-  npm() { echo "npm $*" >> "${command_log}"; }
-  jq() { echo "jq $*" >> "${command_log}"; }
-  git() { echo "git $*" >> "${command_log}"; }
-  bash() { echo "bash $*" >> "${command_log}"; }
-  curl() { echo "curl $*" >> "${command_log}"; }
-  grep() { echo "grep $*" >> "${command_log}"; }
-  sed() { echo "sed $*" >> "${command_log}"; }
-  awk() { echo "awk $*" >> "${command_log}"; }
-  find() { echo "find $*" >> "${command_log}"; }
-  base64() { echo "base64 $*" >> "${command_log}"; }
-  tar() { echo "tar $*" >> "${command_log}"; }
-  gzip() { echo "gzip $*" >> "${command_log}"; }
-  unzip() { echo "unzip $*" >> "${command_log}"; }
-  python3() { echo "python3 $*" >> "${command_log}"; }
+  mock_passing_ci_tools
 
   attest_ci_runner >/dev/null
 
@@ -830,26 +805,7 @@ echo "Test 29: ci admission fails closed without python3"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   command_log="${TMP_DIR}/admission_no_python3.log"
-
-  gh() { echo "gh $*" >> "${command_log}"; }
-  docker() { echo "docker $*" >> "${command_log}"; }
-  node() {
-    echo "node $*" >> "${command_log}"
-    echo "v24.18.0"
-  }
-  npm() { echo "npm $*" >> "${command_log}"; }
-  jq() { echo "jq $*" >> "${command_log}"; }
-  git() { echo "git $*" >> "${command_log}"; }
-  bash() { echo "bash $*" >> "${command_log}"; }
-  curl() { echo "curl $*" >> "${command_log}"; }
-  grep() { echo "grep $*" >> "${command_log}"; }
-  sed() { echo "sed $*" >> "${command_log}"; }
-  awk() { echo "awk $*" >> "${command_log}"; }
-  find() { echo "find $*" >> "${command_log}"; }
-  base64() { echo "base64 $*" >> "${command_log}"; }
-  tar() { echo "tar $*" >> "${command_log}"; }
-  gzip() { echo "gzip $*" >> "${command_log}"; }
-  unzip() { echo "unzip $*" >> "${command_log}"; }
+  mock_passing_ci_tools
   python3() {
     echo "python3 $*" >> "${command_log}"
     return 127
@@ -872,30 +828,11 @@ echo "Test 30: ci admission fails closed without unzip"
 (
   source "${REPO_ROOT}/entrypoint.sh"
   command_log="${TMP_DIR}/admission_no_unzip.log"
-
-  gh() { echo "gh $*" >> "${command_log}"; }
-  docker() { echo "docker $*" >> "${command_log}"; }
-  node() {
-    echo "node $*" >> "${command_log}"
-    echo "v24.18.0"
-  }
-  npm() { echo "npm $*" >> "${command_log}"; }
-  jq() { echo "jq $*" >> "${command_log}"; }
-  git() { echo "git $*" >> "${command_log}"; }
-  bash() { echo "bash $*" >> "${command_log}"; }
-  curl() { echo "curl $*" >> "${command_log}"; }
-  grep() { echo "grep $*" >> "${command_log}"; }
-  sed() { echo "sed $*" >> "${command_log}"; }
-  awk() { echo "awk $*" >> "${command_log}"; }
-  find() { echo "find $*" >> "${command_log}"; }
-  base64() { echo "base64 $*" >> "${command_log}"; }
-  tar() { echo "tar $*" >> "${command_log}"; }
-  gzip() { echo "gzip $*" >> "${command_log}"; }
+  mock_passing_ci_tools
   unzip() {
     echo "unzip $*" >> "${command_log}"
     return 127
   }
-  python3() { echo "python3 $*" >> "${command_log}"; }
 
   set +e
   output="$(attest_ci_runner 2>&1)"
@@ -930,25 +867,12 @@ EOF
   GITHUB_PAT="dummy_pat"
   RUNNER_DIR="${toolchain_dir}"
   RUNNER_LABELS="self-hosted,CI"
+  command_log=/dev/null
   get_token() {
     touch "${toolchain_dir}/token_minted"
     echo "unexpected_token"
   }
-  gh() { :; }
-  docker() { :; }
-  node() { echo "v24.18.0"; }
-  npm() { :; }
-  jq() { :; }
-  git() { :; }
-  bash() { :; }
-  curl() { :; }
-  grep() { :; }
-  sed() { :; }
-  awk() { :; }
-  find() { :; }
-  base64() { :; }
-  tar() { :; }
-  gzip() { :; }
+  mock_passing_ci_tools
   unzip() { return 127; }
 
   set +e
@@ -960,6 +884,302 @@ EOF
   assert_file_absent "${toolchain_dir}/token_minted" "Does not mint a token without unzip"
   assert_file_absent "${toolchain_dir}/config_called" "Does not register without unzip"
   assert_file_absent "${toolchain_dir}/run_called" "Does not start the runner without unzip"
+)
+
+# -----------------------------------------------------------------------------
+# Test 32: every material runtime floor fails closed
+# -----------------------------------------------------------------------------
+echo "Test 32: material runtime version floors"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+
+  version_is_at_least "24.10.0" "24.10"
+  assert_eq "0" "$?" "Accepts an exact stable runtime floor"
+
+  version_is_at_least "25.0.0" "24.10"
+  assert_eq "0" "$?" "Accepts a higher runtime major"
+
+  set +e
+  version_is_at_least "24.10garbage" "24.10"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects malformed version output"
+
+  set +e
+  version_is_at_least "24.10.0-rc.1" "24.10"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects prerelease versions unless explicitly accepted"
+
+  python3() { echo "Python 3.9.19"; }
+  set +e
+  output="$(run_python_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects Python below 3.10"
+  assert_contains "Python >= 3.10 is required" "${output}" "Reports the Python floor"
+
+  bash() { echo "GNU bash, version 4.2.53(1)-release"; }
+  set +e
+  output="$(run_bash_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects Bash below 4.3"
+  assert_contains "Bash >= 4.3 is required" "${output}" "Reports the Bash floor"
+
+  jq() { echo "jq-1.5"; }
+  set +e
+  output="$(run_jq_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects jq below 1.6"
+  assert_contains "jq >= 1.6 is required" "${output}" "Reports the jq floor"
+)
+
+# -----------------------------------------------------------------------------
+# Test 33: each newly fixed capability fails closed when missing
+# -----------------------------------------------------------------------------
+echo "Test 33: newly fixed capabilities fail closed when missing"
+for capability in shellcheck cmp diff zstd; do
+  (
+    source "${REPO_ROOT}/entrypoint.sh"
+    command_log="${TMP_DIR}/admission_no_${capability}.log"
+    mock_passing_ci_tools
+    eval "${capability}() { echo '${capability} \$*' >> '${command_log}'; return 127; }"
+
+    set +e
+    output="$(attest_ci_runner 2>&1)"
+    status=$?
+    set -e
+
+    assert_eq "1" "${status}" "Rejects ci admission without ${capability}"
+    assert_contains "unavailable or unhealthy" "${output}" "Reports missing ${capability}"
+  )
+done
+
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_no_pyyaml.log"
+  mock_passing_ci_tools
+  python3() {
+    echo "python3 $*" >> "${command_log}"
+    if [[ "${1:-}" == "--version" ]]; then
+      echo "Python 3.13.5"
+      return 0
+    fi
+    return 1
+  }
+
+  set +e
+  output="$(attest_ci_runner 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects ci admission without PyYAML"
+  assert_contains "PyYAML is unavailable or unhealthy" "${output}" "Identifies the missing Python module"
+)
+
+# -----------------------------------------------------------------------------
+# Test 34: pwsh label matching is exact and case-insensitive
+# -----------------------------------------------------------------------------
+echo "Test 34: exact pwsh label matching"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/pwsh_admission.log"
+  pwsh() {
+    echo "pwsh $*" >> "${command_log}"
+    echo "PowerShell 7.6.4"
+  }
+
+  labels_include pwsh "self-hosted, PWSH ,ci"
+  assert_eq "0" "$?" "Matches pwsh as a trimmed case-insensitive label"
+
+  attest_pwsh_runner >/dev/null
+  assert_eq "pwsh --version" "$(< "${command_log}")" "Exercises working PowerShell for pwsh admission"
+
+  set +e
+  labels_include pwsh "self-hosted,pwsh-extra,mypwsh"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Does not match labels that merely contain pwsh"
+)
+
+# -----------------------------------------------------------------------------
+# Test 35: missing PowerShell blocks exact pwsh registration before credentials
+# -----------------------------------------------------------------------------
+echo "Test 35: pwsh admission precedes token minting and registration"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  pwsh_dir="${TMP_DIR}/pwsh_boundary"
+  mkdir -p "${pwsh_dir}"
+
+  cat << 'EOF' > "${pwsh_dir}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  cat << 'EOF' > "${pwsh_dir}/run.sh"
+#!/usr/bin/env bash
+touch run_called
+EOF
+  chmod +x "${pwsh_dir}/config.sh" "${pwsh_dir}/run.sh"
+
+  GITHUB_URL="https://github.com/my-org"
+  GITHUB_PAT="dummy_pat"
+  RUNNER_DIR="${pwsh_dir}"
+  RUNNER_LABELS="self-hosted,PwSh"
+  get_token() {
+    touch "${pwsh_dir}/token_minted"
+    echo "unexpected_token"
+  }
+  pwsh() { return 127; }
+
+  set +e
+  output="$(main 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Main fails closed when advertised PowerShell is unavailable"
+  assert_contains "PowerShell is unavailable or unhealthy" "${output}" "Identifies failed pwsh admission"
+  assert_file_absent "${pwsh_dir}/token_minted" "Does not mint a token after failed pwsh admission"
+  assert_file_absent "${pwsh_dir}/config_called" "Does not register after failed pwsh admission"
+  assert_file_absent "${pwsh_dir}/run_called" "Does not start after failed pwsh admission"
+)
+
+# -----------------------------------------------------------------------------
+# Test 36: substring pwsh labels do not claim the capability
+# -----------------------------------------------------------------------------
+echo "Test 36: non-pwsh labels bypass pwsh admission"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  non_pwsh_dir="${TMP_DIR}/non_pwsh_boundary"
+  mkdir -p "${non_pwsh_dir}"
+
+  cat << 'EOF' > "${non_pwsh_dir}/config.sh"
+#!/usr/bin/env bash
+touch config_called
+EOF
+  cat << 'EOF' > "${non_pwsh_dir}/run.sh"
+#!/usr/bin/env bash
+touch run_called
+EOF
+  chmod +x "${non_pwsh_dir}/config.sh" "${non_pwsh_dir}/run.sh"
+
+  GITHUB_URL="https://github.com/my-org"
+  unset GITHUB_PAT RUNNER_TOKEN_CMD RUNNER_REMOVE_TOKEN_CMD || true
+  RUNNER_TOKEN="mock_token"
+  RUNNER_DIR="${non_pwsh_dir}"
+  RUNNER_LABELS="self-hosted,pwsh-extra,mypwsh"
+  attest_pwsh_runner() {
+    touch "${non_pwsh_dir}/unexpected_attestation"
+    return 1
+  }
+
+  set +e
+  main >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "0" "${status}" "Allows registration for labels outside the pwsh contract"
+  assert_file_absent "${non_pwsh_dir}/unexpected_attestation" "Uses exact matching before requiring pwsh admission"
+  assert_file_exists "${non_pwsh_dir}/config_called" "Registers labels outside the pwsh contract"
+  assert_file_exists "${non_pwsh_dir}/run_called" "Starts labels outside the pwsh contract"
+)
+
+# -----------------------------------------------------------------------------
+# Test 37: default labels follow runtime architecture without replacing overrides
+# -----------------------------------------------------------------------------
+echo "Test 37: runtime architecture labels"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+
+  unset RUNNER_LABELS || true
+  uname() { echo "x86_64"; }
+  initialize_runner_labels
+  assert_eq "self-hosted,linux,x64,docker" "${RUNNER_LABELS}" "Defaults x86_64 runners to x64"
+
+  unset RUNNER_LABELS
+  uname() { echo "aarch64"; }
+  initialize_runner_labels
+  assert_eq "self-hosted,linux,ARM64,docker" "${RUNNER_LABELS}" "Defaults aarch64 runners to ARM64"
+
+  RUNNER_LABELS="self-hosted,linux,custom"
+  uname() {
+    touch "${TMP_DIR}/unexpected_uname"
+    return 1
+  }
+  initialize_runner_labels
+  assert_eq "self-hosted,linux,custom" "${RUNNER_LABELS}" "Preserves explicit runner labels"
+  assert_file_absent "${TMP_DIR}/unexpected_uname" "Does not inspect architecture for explicit labels"
+)
+
+# -----------------------------------------------------------------------------
+# Test 38: child-equivalent supervisor admission precedes every credential mint
+# -----------------------------------------------------------------------------
+echo "Test 38: child-equivalent supervisor admission precedes token minting"
+for capability in ci pwsh; do
+  (
+    source "${REPO_ROOT}/entrypoint.sh"
+    boundary_dir="${TMP_DIR}/supervisor_${capability}_boundary"
+    mkdir -p "${boundary_dir}"
+    docker_log="${boundary_dir}/docker.log"
+
+    GITHUB_URL="https://github.com/Verjson/test"
+    GITHUB_PAT="dummy"
+    RUNNER_NAME="${capability}-supervisor"
+    RUNNER_LABELS="self-hosted,${capability}"
+    RUNNER_IMAGE="gha-runner:${capability}"
+    RUNNER_EPHEMERAL=1
+    resolve_token() {
+      touch "${boundary_dir}/token_minted"
+      RUNNER_TOKEN="unexpected"
+    }
+    docker() {
+      echo "$*" >> "${docker_log}"
+      if [[ "$*" == run\ --rm*gha-${capability}-supervisor-admission* ]]; then
+        return 1
+      fi
+      return 0
+    }
+    attest_ci_runner() {
+      touch "${boundary_dir}/controller_ci_attestation"
+      return 0
+    }
+    attest_pwsh_runner() {
+      touch "${boundary_dir}/controller_pwsh_attestation"
+      return 0
+    }
+
+    set +e
+    supervise_ephemeral >/dev/null 2>&1
+    status=$?
+    set -e
+
+    assert_eq "1" "${status}" "Supervisor fails closed when ${capability} admission fails"
+    assert_file_absent "${boundary_dir}/token_minted" "Does not mint a token before ${capability} admission"
+    assert_file_absent "${boundary_dir}/controller_${capability}_attestation" "Does not substitute controller-local ${capability} admission"
+    assert_contains "RUNNER_LABELS=self-hosted,${capability}" "$(< "${docker_log}")" "Passes exact labels to the candidate image"
+    assert_contains "gha-runner:${capability} admit" "$(< "${docker_log}")" "Invokes credential-free admission in the candidate image"
+    assert_not_contains "/var/run/docker.sock" "$(< "${docker_log}")" "Keeps the default admission candidate socketless"
+    assert_not_contains "GITHUB_PAT=" "$(< "${docker_log}")" "Does not pass a PAT to candidate admission"
+    assert_not_contains "RUNNER_TOKEN=" "$(< "${docker_log}")" "Does not pass a registration token to candidate admission"
+  )
+done
+
+# -----------------------------------------------------------------------------
+# Test 39: candidate admission dispatch checks exact labels without credentials
+# -----------------------------------------------------------------------------
+echo "Test 39: credential-free candidate admission dispatch"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  admission_log="${TMP_DIR}/candidate_admission.log"
+  RUNNER_LABELS="self-hosted,CI,PwSh"
+  unset GITHUB_URL GITHUB_PAT RUNNER_TOKEN RUNNER_TOKEN_CMD || true
+  attest_ci_runner() { echo "ci" >> "${admission_log}"; }
+  attest_pwsh_runner() { echo "pwsh" >> "${admission_log}"; }
+
+  main admit
+
+  assert_eq $'ci\npwsh' "$(< "${admission_log}")" "Candidate dispatch admits both exact capability labels"
 )
 
 echo "-----------------------------------------------------------------------------"

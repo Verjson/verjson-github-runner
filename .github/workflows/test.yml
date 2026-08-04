@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Run entrypoint unit test suite
         run: bash tests/entrypoint_test.sh
+      - name: Validate PowerShell setup architecture labels
+        run: bash tests/setup_powershell_source_test.sh
       - name: Prove ephemeral jobs receive fresh writable layers
         run: bash tests/ephemeral_supervisor_integration.sh
       - name: Canonical changelog contract holds

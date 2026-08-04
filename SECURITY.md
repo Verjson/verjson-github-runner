@@ -63,24 +63,34 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
 ### Fail-Closed `ci` Capability Admission
 * **Control**: When `RUNNER_LABELS` contains the exact `ci` label, matched
   case-insensitively to GitHub's label semantics, `entrypoint.sh`
-  exercises GitHub CLI, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git,
-  bash, curl, grep, sed, awk, find, base64, tar, gzip, unzip, and python3 before
-  resolving any registration credential.
+  exercises GitHub CLI, Docker daemon access, Compose, Buildx, Node.js >=24.10, npm,
+  jq >=1.6, git, Bash >=4.3, curl, grep, sed, awk, find, base64, tar, gzip, unzip,
+  Python >=3.10, PyYAML, ShellCheck, `cmp`, `diff`, and zstd before resolving any
+  registration credential.
 * **Effect**: A container cannot advertise `ci` and accept a job with a partial toolchain.
   Failure prevents both registration-token minting and `config.sh` registration; there is
-  no caller-controlled bypass.
+  no caller-controlled bypass. Before every token mint, an ephemeral supervisor launches
+  a credential-free disposable candidate from `RUNNER_IMAGE` with the real child's
+  environment, network, and socket mounts. The child independently repeats admission
+  before registration.
 * **Boundary**: Docker daemon admission proves functionality, not isolation. A `ci`
   runner with a mounted Docker socket is host-root-equivalent and must be restricted to
   trusted repositories and ephemeral/job-clean execution.
+* **PowerShell variant**: PowerShell remains a separate capability. Advertising the exact
+  case-insensitive `pwsh` label requires `pwsh --version` before token minting or
+  registration; substring labels such as `pwsh-extra` do not opt in. The published
+  multi-architecture `:pwsh` image is layered on the attested base and receives the same
+  immutable digest receipt, SBOM, and provenance treatment.
 
 ### Image Supply-Chain Integrity
 * **GitHub CLI and Node.js**: The base image pins upstream release versions and
   architecture-specific SHA-256 checksums published by GitHub and Node.js. Image
   construction fails on a checksum mismatch.
 * **Published images**: BuildKit publishes SBOM and provenance attestations for the shared
-  multi-architecture base and kind images. The workflow retains a receipt binding each
-  commit-addressed tag to its immutable manifest digest.
-* **Isolation-supervisor contract label**: The base image — and therefore every kind image
+  multi-architecture base, language-kind, and PowerShell images. The workflow retains a
+  receipt binding each commit-addressed tag to its immutable manifest digest. Every
+  variant's `FROM` is bound to the exact base manifest digest emitted by the base job.
+* **Isolation-supervisor contract label**: The base image — and therefore every variant
   built `FROM` it — carries the OCI config label
   `com.verjson.gha-runner.isolation-supervisor="1"`, which declares that the entrypoint
   implements the one-job supervisor contract. Isolated-mode consumers

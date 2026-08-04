@@ -29,8 +29,9 @@ Tequity. CI builds one shared artifact and pushes it to
 
 | Tag | Contents |
 |-----|----------|
-| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, non-root) |
+| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, organization CI tools, non-root) |
 | `:rust` `:node` `:python` `:go` | base + that language toolchain |
+| `:pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
 | `:base-<version>` (e.g. `:base-v0.1.0`) | pinned release, `FROM` a tagged release |
 | `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
 
@@ -40,7 +41,8 @@ Tequity. CI builds one shared artifact and pushes it to
   `docker compose` against a mounted host socket.
 - Every published image includes BuildKit SBOM and provenance attestations. Each publish
   run also retains a receipt mapping every commit-addressed `:*-<sha>` tag to its immutable
-  manifest digest.
+  manifest digest. Language and PowerShell variants build from the exact base manifest
+  digest output by that run, never from a mutable base tag.
 
 **Two ways to consume the same image:**
 
@@ -71,10 +73,15 @@ artifact (this image), so every path can stay in lockstep on one runner definiti
 The exact `ci` label (matched case-insensitively, like GitHub labels) declares a portable
 capability contract shared by Verjson and Tequity. Before minting a registration token
 or running `config.sh`, the container
-exercises `gh`, Docker daemon access, Compose, Buildx, Node.js 24, npm, jq, git, bash,
-curl, grep, sed, awk, find, base64, tar, gzip, unzip, and python3. If any check fails,
+exercises `gh`, Docker daemon access, Compose, Buildx, Node.js >=24.10, npm, jq >=1.6,
+git, Bash >=4.3, curl, grep, sed, awk, find, base64, tar, gzip, unzip, Python >=3.10,
+PyYAML, ShellCheck, `cmp`, `diff`, and zstd. If any check fails,
 startup stops and the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt
-into this contract. PowerShell is not part of the portable Linux contract.
+into this contract. PowerShell is not part of the portable Linux contract: the exact
+case-insensitive `pwsh` label independently requires `pwsh --version` before registration.
+Before minting each one-shot token, an ephemeral supervisor runs a credential-free `--rm`
+candidate from `RUNNER_IMAGE` with the planned child's labels, network, environment, and
+socket mounts. The registered child repeats admission before registering.
 
 Deploy immutable digests rather than mutable tags:
 
@@ -117,15 +124,16 @@ contract label compose on top of a lane label rather than replacing it.
 
 **What this image does and does not enforce.** A lane label is a routing convention that
 whatever provisions the runner attaches; the images here do not add one. `entrypoint.sh`
-defaults `RUNNER_LABELS` to `self-hosted,linux,x64,docker`, and `setup.sh` prompts with the
-same set — neither carries a lane, so the local and compose paths below are unlaned today.
+and `setup.sh` default to `self-hosted,linux,<runtime-architecture>,docker` (`x64` on
+`x86_64`, `ARM64` on `aarch64`/`arm64`). `setup.ps1` derives the same default from the
+PowerShell runtime architecture. None carries a lane, and explicit labels are preserved.
 
 The `isolated` lane is the exception, and `untrusted-pr` is what opts a runner into it.
 When `RUNNER_LABELS` contains `untrusted-pr`, the supervisor (`entrypoint.sh supervise`)
 runs a fail-closed contract check before starting any job container: the labels must also
-include `self-hosted`, `isolated`, `linux`, `x64`, `ephemeral`, and `no-host-docker`, and
-the runner group must be non-`Default`, `RUNNER_IMAGE` digest-pinned, the host socket
-disabled, the child network dedicated, and metadata denial attested — see
+include `self-hosted`, `isolated`, `linux`, the current runtime architecture, `ephemeral`,
+and `no-host-docker`, and the runner group must be non-`Default`, `RUNNER_IMAGE`
+digest-pinned, the host socket disabled, the child network dedicated, and metadata denial attested — see
 [`SECURITY.md`](SECURITY.md) for each requirement. Two consequences worth stating plainly:
 the check does not run at all without `untrusted-pr` (so that label is the trigger, not one
 of several interchangeable requirements), and it does not run on the ordinary
@@ -224,10 +232,11 @@ target it via `runs-on`:
 | **Node** | Node.js LTS + npm, pnpm, yarn | `[self-hosted, node]` |
 | **Python** | Python 3 + pip/venv + uv | `[self-hosted, python]` |
 | **Go** | official Go toolchain | `[self-hosted, go]` |
-| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, portable shell tools | `[self-hosted]` |
+| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, organization CI tools | `[self-hosted]` |
+| **PowerShell** | Base + pinned PowerShell | `[self-hosted, pwsh]` |
 
-The images live in `images/<kind>.Dockerfile` (all build `FROM gha-runner:base`) — add your
-own kind by dropping in a new Dockerfile and a matching entry in `app/internal/kinds/kinds.go`.
+Language kinds live in `images/<kind>.Dockerfile`; the published PowerShell variant uses
+the single root `Dockerfile.pwsh`. All layer on `gha-runner:base`.
 
 > **Auth note:** In ephemeral mode, only the controller holds your renewable
 > `gh` OAuth token. It mints a short-lived, one-shot registration token for each
@@ -308,25 +317,27 @@ jobs:
 
 ### PowerShell variant (opt-in)
 
-The image built by `docker compose` and `setup.sh` (the root `Dockerfile`) carries
-`ca-certificates curl jq git sudo tar gzip` and no PowerShell. `Dockerfile.pwsh` adds a
-pinned, checksum-verified `pwsh` on top of it for jobs that run PowerShell suites — it is
-a **separate tag**, not a change to the default runner, because PowerShell adds ~270 MB
-and only some lanes need it:
+The image built by `docker compose` and `setup.sh` (the root `Dockerfile`) carries no
+PowerShell. `Dockerfile.pwsh` adds a pinned, checksum-verified `pwsh` on top of the
+published attested base for jobs that run PowerShell suites. It is a **separate `:pwsh`
+tag**, not a change to the default runner, because PowerShell adds ~270 MB and only some
+lanes need it:
 
 ```sh
-docker build -t gha-runner:persistent .
-docker build -f Dockerfile.pwsh --build-arg BASE_IMAGE=gha-runner:persistent \
-  -t gha-runner:persistent-pwsh .
+docker build -f images/base.Dockerfile -t gha-runner:base .
+docker build -f Dockerfile.pwsh --build-arg BASE_IMAGE=gha-runner:base \
+  -t gha-runner:pwsh .
 ```
 
-Point compose at the variant with `image: gha-runner:persistent-pwsh` (dropping `build:`),
-or set `IMAGE=gha-runner:persistent-pwsh` for `setup.sh`.
+Point compose at the variant with `image: gha-runner:pwsh` after removing its `build:`
+entry, and add the distinct `pwsh` label to `.env`'s `RUNNER_LABELS`. Startup fails before
+token minting if that exact label is advertised by an image without working PowerShell.
+Labels such as `pwsh-extra` do not make the claim. `setup.sh` always builds the root
+Dockerfile and therefore does not select this published variant.
 
-> This is separate from `images/base.Dockerfile`. PowerShell is **not** part of the
-> portable `ci` contract that `entrypoint.sh` admits (see
-> [`The ci runner contract`](#the-ci-runner-contract)), and the variant does not change
-> that — it only adds a tool to the persistent-lane image.
+> PowerShell is **not** part of the portable `ci` contract that `entrypoint.sh` admits
+> (see [`The ci runner contract`](#the-ci-runner-contract)). The independently admitted
+> `pwsh` label composes with `ci` when a lane needs both contracts.
 
 ## Runner groups (org runners only)
 
@@ -357,18 +368,18 @@ to it, so you can ignore groups entirely unless you want the access control.
 |------|---------|
 | `setup.sh` | Interactive CLI for **Linux / macOS** — prompts, builds, launches N runners as services. |
 | `setup.ps1` | Interactive CLI for **Windows** (PowerShell) — same flow. |
-| `images/base.Dockerfile` | Base runner image (Ubuntu 24.04, non-root `runner`, shared `ci` tools). Every kind builds `FROM` it. |
+| `images/base.Dockerfile` | Base runner image (Ubuntu 26.04, non-root `runner`, shared `ci` tools). Every published variant builds `FROM` it. |
 | `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
 | `.github/workflows/publish-images.yml` | CI: build + push attested multi-arch images and retain immutable digest receipts. |
 | `entrypoint.sh` | Admits the exact `ci` contract before credentials, mints/uses a registration token, runs, and de-registers on stop. |
 | `docker-compose.yml` | Single-runner alternative with one-use PAT delivery. |
-| `Dockerfile.pwsh` | Opt-in PowerShell variant layered on the root `Dockerfile` image (see below). |
+| `Dockerfile.pwsh` | Published PowerShell variant layered on the attested base image. |
 | `.env` | Non-secret configuration for the compose path (git-ignored). |
 
 > Two live images, different jobs: the root `Dockerfile` is what `setup.sh` and
-> `docker-compose.yml` build for the persistent lane (and what `Dockerfile.pwsh` layers
-> on), while `images/base.Dockerfile` is the portable published image that carries the
-> `ci` contract.
+> `docker-compose.yml` build for the persistent lane, while `images/base.Dockerfile` is
+> the portable published image that carries the `ci` contract and underpins the published
+> PowerShell variant.
 
 ## Notes
 - **Token options** (`entrypoint.sh`, in order of preference):
@@ -395,7 +406,8 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_METADATA_DENY_ATTEST_CMD` — controller command that must attest the
     child network's metadata denial before every isolated generation.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
-    bypass startup admission.
+    bypass startup admission; advertising exact `pwsh` independently requires working
+    PowerShell before registration.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
   plugins. To let workflows use them, mount the host socket at run time
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in

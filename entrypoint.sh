@@ -9,7 +9,7 @@ set -euo pipefail
 #   RUNNER_REMOVE_TOKEN_CMD — optional, command that outputs a fresh removal token on cleanup
 #   RUNNER_TOKEN     — optional, static one-shot registration token (~1h expiration)
 #   RUNNER_NAME      — optional, runner hostname identifier (defaults to system hostname)
-#   RUNNER_LABELS    — optional, comma-separated runner labels (defaults to self-hosted,linux,x64,docker)
+#   RUNNER_LABELS    — optional labels (defaults to self-hosted,linux,<runtime architecture>,docker)
 #   RUNNER_GROUP     — optional, org runner group name (defaults to Default)
 #   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
 #   RUNNER_EPHEMERAL — optional boolean; true runs one job in this container
@@ -63,7 +63,7 @@ consume_github_pat() {
 append_child_env() {
   local name="$1"
   if [[ -n "${!name:-}" ]]; then
-    child_args+=(-e "${name}=${!name}")
+    child_runtime_args+=(-e "${name}=${!name}")
   fi
 }
 
@@ -99,12 +99,17 @@ log_configured_proxy() {
 stop_ephemeral_child() {
   if [[ -n "${EPHEMERAL_CHILD_NAME:-}" ]]; then
     docker stop --time 10 "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
-    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || return 1
-    if docker container inspect "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1; then
-      echo "Ephemeral child teardown failed: ${EPHEMERAL_CHILD_NAME} still exists." >&2
-      return 1
-    fi
-    echo "EPHEMERAL_TEARDOWN child=${EPHEMERAL_CHILD_NAME} removed=true"
+    docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
+    local attempt
+    for ((attempt = 0; attempt < 20; attempt++)); do
+      if ! docker container inspect "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1; then
+        echo "EPHEMERAL_TEARDOWN child=${EPHEMERAL_CHILD_NAME} removed=true"
+        return 0
+      fi
+      sleep 0.1
+    done
+    echo "Ephemeral child teardown failed: ${EPHEMERAL_CHILD_NAME} still exists." >&2
+    return 1
   fi
 }
 
@@ -120,10 +125,30 @@ labels_include() {
   return 1
 }
 
+runtime_arch_label() {
+  local architecture
+  architecture="$(uname -m)" || return 1
+  case "${architecture,,}" in
+    x86_64|amd64) echo "x64" ;;
+    aarch64|arm64) echo "ARM64" ;;
+    *)
+      echo "Unsupported runner architecture: ${architecture}." >&2
+      return 1 ;;
+  esac
+}
+
+initialize_runner_labels() {
+  [[ -z "${RUNNER_LABELS:-}" ]] || return 0
+  local architecture
+  architecture="$(runtime_arch_label)" || return 1
+  RUNNER_LABELS="self-hosted,linux,${architecture},docker"
+}
+
 validate_isolated_contract() {
-  local required
+  local required architecture
   labels_include untrusted-pr "${RUNNER_LABELS:-}" || return 0
-  for required in self-hosted isolated linux x64 untrusted-pr ephemeral no-host-docker; do
+  architecture="$(runtime_arch_label)" || return 1
+  for required in self-hosted isolated linux "${architecture}" untrusted-pr ephemeral no-host-docker; do
     labels_include "${required}" "${RUNNER_LABELS}" || {
       echo "Isolated runner contract requires label '${required}'." >&2
       return 1
@@ -151,6 +176,24 @@ validate_isolated_contract() {
   }
 }
 
+attest_child_image() {
+  if ! runner_labels_include_ci "${RUNNER_LABELS}" &&
+     ! labels_include pwsh "${RUNNER_LABELS}"; then
+    return 0
+  fi
+
+  local candidate_name="gha-${RUNNER_NAME}-admission"
+  docker rm -f "${candidate_name}" >/dev/null 2>&1 || true
+  if ! docker run --rm \
+      --name "${candidate_name}" \
+      --label "gha.ephemeral-admission=true" \
+      "${child_runtime_args[@]}" \
+      "${RUNNER_IMAGE}" admit; then
+    echo "Ephemeral child capability admission failed for labels: ${RUNNER_LABELS}." >&2
+    return 1
+  fi
+}
+
 supervise_ephemeral() {
   : "${RUNNER_IMAGE:?Supervisor mode requires RUNNER_IMAGE}"
   : "${RUNNER_NAME:?Supervisor mode requires RUNNER_NAME}"
@@ -165,6 +208,7 @@ supervise_ephemeral() {
     echo "Supervisor mode requires RUNNER_EPHEMERAL=true." >&2
     return 1
   fi
+  initialize_runner_labels || return 1
   validate_isolated_contract || return 1
 
   local max_jobs="${RUNNER_EPHEMERAL_MAX_JOBS:-0}"
@@ -181,6 +225,35 @@ supervise_ephemeral() {
     # another job. The exact name is derived from the configured runner name.
     docker rm -f "${EPHEMERAL_CHILD_NAME}" >/dev/null 2>&1 || true
 
+    # Build one option set for both the credential-free candidate and the real
+    # child so admission sees the same image, environment, network, and mounts.
+    child_runtime_args=(
+      -e "GITHUB_URL=${GITHUB_URL}"
+      -e "RUNNER_NAME=${RUNNER_NAME}"
+      -e "RUNNER_LABELS=${RUNNER_LABELS}"
+      -e "RUNNER_GROUP=${RUNNER_GROUP:-Default}"
+      -e "RUNNER_WORKDIR=${RUNNER_WORKDIR:-_work}"
+      -e "RUNNER_EPHEMERAL=1"
+      -e "RUNNER_FRESH_CONTAINER=1"
+      -e "RUNNER_TOKEN_STDIN=1"
+    )
+    if [[ -n "${RUNNER_CHILD_NETWORK:-}" ]]; then
+      child_runtime_args+=(--network "${RUNNER_CHILD_NETWORK}" --add-host "metadata.google.internal:127.0.0.1")
+    fi
+    append_child_env HTTPS_PROXY
+    append_child_env HTTP_PROXY
+    append_child_env NO_PROXY
+    append_child_env https_proxy
+    append_child_env http_proxy
+    append_child_env no_proxy
+    if [[ "${RUNNER_CHILD_MOUNT_SOCK:-0}" == 1 ]]; then
+      child_runtime_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
+    fi
+
+    # This disposable candidate receives no registration credential or
+    # persistent runner state. The real child repeats admission before registering.
+    attest_child_image || return 1
+
     # Mint a short-lived, one-shot registration token in the controller. Never
     # forward the renewable PAT or token command into the untrusted job child.
     parse_github_url
@@ -196,28 +269,8 @@ supervise_ephemeral() {
       run --rm -i
       --name "${EPHEMERAL_CHILD_NAME}"
       --label "gha.ephemeral-job=true"
-      -e "GITHUB_URL=${GITHUB_URL}"
-      -e "RUNNER_NAME=${RUNNER_NAME}"
-      -e "RUNNER_LABELS=${RUNNER_LABELS:-self-hosted,linux,x64}"
-      -e "RUNNER_GROUP=${RUNNER_GROUP:-Default}"
-      -e "RUNNER_WORKDIR=${RUNNER_WORKDIR:-_work}"
-      -e "RUNNER_EPHEMERAL=1"
-      -e "RUNNER_FRESH_CONTAINER=1"
-      -e "RUNNER_TOKEN_STDIN=1"
     )
-    if [[ -n "${RUNNER_CHILD_NETWORK:-}" ]]; then
-      child_args+=(--network "${RUNNER_CHILD_NETWORK}" --add-host "metadata.google.internal:127.0.0.1")
-    fi
-    append_child_env HTTPS_PROXY
-    append_child_env HTTP_PROXY
-    append_child_env NO_PROXY
-    append_child_env https_proxy
-    append_child_env http_proxy
-    append_child_env no_proxy
-    if [[ "${RUNNER_CHILD_MOUNT_SOCK:-0}" == 1 ]]; then
-      child_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
-    fi
-    child_args+=("${RUNNER_IMAGE}")
+    child_args+=("${child_runtime_args[@]}" "${RUNNER_IMAGE}")
 
     echo "Starting fresh ephemeral job container ${EPHEMERAL_CHILD_NAME} (generation $((completed + 1)))..."
     # Wait on a background Docker client so Bash can execute SIGINT/SIGTERM
@@ -272,18 +325,76 @@ run_admission_check() {
   fi
 }
 
-run_node_24_admission_check() {
+version_is_at_least() {
+  local actual="$1" minimum="$2"
+  local actual_major actual_minor minimum_major minimum_minor
+
+  # Only stable numeric versions are admitted. Malformed and prerelease strings
+  # fail closed instead of being accepted by a matching major/minor prefix.
+  [[ "${actual}" =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]] || return 1
+  actual_major=$((10#${BASH_REMATCH[1]}))
+  actual_minor=$((10#${BASH_REMATCH[2]}))
+  [[ "${minimum}" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 1
+  minimum_major=$((10#${BASH_REMATCH[1]}))
+  minimum_minor=$((10#${BASH_REMATCH[2]}))
+
+  (( actual_major > minimum_major ||
+     (actual_major == minimum_major && actual_minor >= minimum_minor) ))
+}
+
+require_minimum_version() {
+  local name="$1" minimum="$2" actual="$3" display="$4"
+
+  if ! version_is_at_least "${actual}" "${minimum}"; then
+    echo "CI runner admission failed: ${name} >= ${minimum} is required; found ${display}." >&2
+    return 1
+  fi
+}
+
+run_node_admission_check() {
   local version
 
   if ! version="$(node --version)"; then
-    echo "CI runner admission failed: Node.js 24 is unavailable or unhealthy." >&2
+    echo "CI runner admission failed: Node.js is unavailable or unhealthy." >&2
     return 1
   fi
   echo "${version}"
-  if [[ ! "${version}" =~ ^v24\. ]]; then
-    echo "CI runner admission failed: Node.js major 24 is required; found ${version}." >&2
+  require_minimum_version "Node.js" "24.10" "${version#v}" "${version}"
+}
+
+run_jq_admission_check() {
+  local version
+
+  if ! version="$(jq --version)"; then
+    echo "CI runner admission failed: jq is unavailable or unhealthy." >&2
     return 1
   fi
+  echo "${version}"
+  require_minimum_version "jq" "1.6" "${version#jq-}" "${version}"
+}
+
+run_bash_admission_check() {
+  local output version
+
+  if ! output="$(bash --version)"; then
+    echo "CI runner admission failed: bash is unavailable or unhealthy." >&2
+    return 1
+  fi
+  echo "${output}"
+  version="${output#*version }"
+  version="${version%%(*}"
+  require_minimum_version "Bash" "4.3" "${version}" "${version}"
+}
+
+run_python_admission_check() {
+  local version
+
+  if ! version="$(python3 --version)"; then
+    echo "CI runner admission failed: python3 is unavailable or unhealthy." >&2
+    return 1
+  fi
+  echo "${version}"
+  require_minimum_version "Python" "3.10" "${version#Python }" "${version}"
 }
 
 attest_ci_runner() {
@@ -292,11 +403,11 @@ attest_ci_runner() {
   run_admission_check "Docker daemon" docker version || return 1
   run_admission_check "Docker Compose" docker compose version || return 1
   run_admission_check "Docker Buildx" docker buildx version || return 1
-  run_node_24_admission_check || return 1
+  run_node_admission_check || return 1
   run_admission_check "npm" npm --version || return 1
-  run_admission_check "jq" jq --version || return 1
+  run_jq_admission_check || return 1
   run_admission_check "git" git --version || return 1
-  run_admission_check "bash" bash --version || return 1
+  run_bash_admission_check || return 1
   run_admission_check "curl" curl --version || return 1
   run_admission_check "grep" grep --version || return 1
   run_admission_check "sed" sed --version || return 1
@@ -306,8 +417,29 @@ attest_ci_runner() {
   run_admission_check "tar" tar --version || return 1
   run_admission_check "gzip" gzip --version || return 1
   run_admission_check "unzip" unzip -v || return 1
-  run_admission_check "python3" python3 --version || return 1
+  run_python_admission_check || return 1
+  run_admission_check "PyYAML" python3 -c 'import yaml' || return 1
+  run_admission_check "ShellCheck" shellcheck --version || return 1
+  run_admission_check "cmp" cmp /dev/null /dev/null || return 1
+  run_admission_check "diff" diff /dev/null /dev/null || return 1
+  run_admission_check "zstd" zstd --version || return 1
   echo "CI runner admission passed."
+}
+
+attest_pwsh_runner() {
+  echo "Attesting required pwsh runner capability..."
+  run_admission_check "PowerShell" pwsh --version
+}
+
+attest_runner_labels() {
+  local claimed_labels="$1"
+
+  if runner_labels_include_ci "${claimed_labels}"; then
+    attest_ci_runner || return 1
+  fi
+  if labels_include pwsh "${claimed_labels}"; then
+    attest_pwsh_runner || return 1
+  fi
 }
 
 get_token() {  # $1 = registration | remove
@@ -368,6 +500,11 @@ main() {
     attest_ci_runner
     return $?
   fi
+  if [[ "${1:-}" == "admit" ]]; then
+    initialize_runner_labels || return 1
+    attest_runner_labels "${RUNNER_LABELS}"
+    return $?
+  fi
   if [[ "${1:-}" == "supervise" ]]; then
     supervise_ephemeral
     return $?
@@ -377,7 +514,7 @@ main() {
   cd "${RUNNER_DIR:-/home/runner/actions-runner}"
 
   RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
-  RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,docker}"
+  initialize_runner_labels || return 1
   RUNNER_GROUP="${RUNNER_GROUP:-Default}"
   RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
   normalize_ephemeral_mode || return 1
@@ -388,9 +525,7 @@ main() {
 
   # Advertising "ci" is a capability claim. Prove the complete contract before any
   # registration credential is minted or config.sh can make the runner schedulable.
-  if runner_labels_include_ci "${RUNNER_LABELS}"; then
-    attest_ci_runner || return 1
-  fi
+  attest_runner_labels "${RUNNER_LABELS}" || return 1
 
   # Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
   # environment automatically. We just surface it in the logs when one is configured.

@@ -14,6 +14,7 @@ on:
       - images/**
       - entrypoint.sh
       - .github/workflows/image-build-check.yml
+      - .github/workflows/publish-images.yml
   # The PR leg is amd64 only, so arm64-specific breakage — a stale GH_SHA256_ARM64 or
   # NODE_SHA256_ARM64 after an upstream re-release, an arm64-only package gap — still
   # reaches main unseen. The arm64 build is emulated and slow, too slow to put in front
@@ -61,6 +62,12 @@ jobs:
               --build-arg "BASE_IMAGE=gha-runner:pr-check-base" \
               -t "gha-runner:pr-check-${kind}" .
           done
+      - name: Build pwsh variant on the just-built base
+        run: |
+          docker build --platform linux/amd64 \
+            -f Dockerfile.pwsh \
+            --build-arg "BASE_IMAGE=gha-runner:pr-check-base" \
+            -t gha-runner:pr-check-pwsh .
 
   root:
     if: github.event_name == 'pull_request'
@@ -72,22 +79,9 @@ jobs:
       # so it can break on its own and is built in parallel.
       - name: Build root Dockerfile
         run: docker build --platform linux/amd64 -f Dockerfile -t gha-runner:pr-check-root .
-      # The pwsh variant is a thin FROM on the root image, so it is built on the root image
-      # from this same commit — the same wiring the kind images use against the base. Without
-      # this, a root Dockerfile change that breaks the variant (a dropped .NET dependency, a
-      # renamed user) is only discovered by whoever builds the variant by hand.
-      - name: Build pwsh variant on the just-built root image
-        run: |
-          docker build --platform linux/amd64 \
-            -f Dockerfile.pwsh \
-            --build-arg "BASE_IMAGE=gha-runner:pr-check-root" \
-            -t gha-runner:pr-check-root-pwsh .
-
-  # Weekly/on-demand arm64 build of the base image only. Everything arch-specific lives in
-  # images/base.Dockerfile (the per-arch gh and Node checksums); the kind images add no
-  # per-arch pins of their own, so building the base is what closes the gap, and skipping
-  # the kinds keeps an emulated run to one image. Build-only, nothing pushed.
-  base-arm64:
+  # Weekly/on-demand arm64 builds cover every architecture-specific pin: gh and Node in
+  # the base plus PowerShell in its thin variant. Other kinds add no per-arch pins.
+  base-and-pwsh-arm64:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -99,3 +93,9 @@ jobs:
         run: |
           docker build --platform linux/arm64 \
             -f images/base.Dockerfile -t gha-runner:cron-check-base-arm64 .
+      - name: Build pwsh variant for arm64 under emulation
+        run: |
+          docker build --platform linux/arm64 \
+            -f Dockerfile.pwsh \
+            --build-arg "BASE_IMAGE=gha-runner:cron-check-base-arm64" \
+            -t gha-runner:cron-check-pwsh-arm64 .
