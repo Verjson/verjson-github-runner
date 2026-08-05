@@ -25,6 +25,31 @@ jobs:
       - name: Canonical changelog contract holds
         run: bash scripts/changelog-contract.test.sh
 
+  # This repository is public, so it cannot be admitted to the runner group carrying the
+  # shared persistent lane. Every org reusable workflow it calls falls back to a hardcoded
+  # '["self-hosted","general"]' literal when these variables are absent, and that fallback
+  # does not fail — it queues forever with no check run (ADR 0003). Deleting or renaming a
+  # variable must therefore break loudly here rather than silently restore the deadlock.
+  routing-guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Reusable-workflow routing stays on GitHub-hosted runners
+        env:
+          RUNNER_DEFAULT: ${{ vars.VERJSON_RUNNER_DEFAULT }}
+          RUNNER_UNTRUSTED: ${{ vars.VERJSON_RUNNER_UNTRUSTED }}
+          RUNNER_ISOLATED: ${{ vars.VERJSON_RUNNER_ISOLATED }}
+          RUNNER_FASTLANE: ${{ vars.VERJSON_RUNNER_FASTLANE }}
+        run: |
+          status=0
+          for name in RUNNER_DEFAULT RUNNER_UNTRUSTED RUNNER_ISOLATED RUNNER_FASTLANE; do
+            value="${!name}"
+            if [[ "${value}" != '["ubuntu-24.04"]' ]]; then
+              echo "::error::VERJSON_${name} must be '[\"ubuntu-24.04\"]' for this public repository; found '${value:-<unset>}'. See docs/decisions/0003-public-repository-ci-routes-to-hosted-runners."
+              status=1
+            fi
+          done
+          exit "${status}"
+
   go-tests:
     runs-on: ubuntu-latest
     steps:
