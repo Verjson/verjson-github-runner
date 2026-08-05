@@ -404,8 +404,12 @@ run_python_admission_check() {
 
 # A kernel OOM kill lands on the job process or the listener itself, so GitHub reports
 # a cancelled step or an absent log rather than a memory fault. Swap counts toward the
-# survival margin: the same lockfile that killed a 4 GB swapless host installs fine once
-# the host can page. Reading the budget from a path keeps the parse testable.
+# survival margin because the kills that prompted this were global host OOMs on hosts
+# with no page-out path at all; RAM+swap is a proxy for surviving a large install, not a
+# claim that swap specifically is required. Reads the host's figures — a container memory
+# limit is invisible here, so a capped container would over-report. Nothing in this fleet
+# sets one; a `--memory`/`mem_limit` would need this to take the tighter of the two.
+# Taking the path as an argument keeps the parse testable.
 parse_memory_budget_mb() {
   local meminfo="$1" mem_kb swap_kb
 
@@ -425,13 +429,20 @@ host_memory_budget_mb() {
 run_memory_admission_check() {
   local minimum="${RUNNER_MIN_MEMORY_MB:-${DEFAULT_MIN_MEMORY_MB}}" budget
 
-  if [[ ! "${minimum}" =~ ^[0-9]+$ ]]; then
-    echo "CI runner admission failed: RUNNER_MIN_MEMORY_MB must be a whole number of megabytes; found ${minimum}." >&2
+  # Leading zeros are rejected rather than tolerated: `(( ))` reads 08192 as octal, fails,
+  # and a failed comparison would read as "not below the minimum" — admitting every host
+  # while logging success. A zero-padded megabyte count is a plausible operator typo.
+  if [[ ! "${minimum}" =~ ^([1-9][0-9]*|0)$ ]]; then
+    echo "CI runner admission failed: RUNNER_MIN_MEMORY_MB must be a whole number of megabytes without leading zeros; found ${minimum}." >&2
     return 1
   fi
   if ! budget="$(host_memory_budget_mb)"; then
     echo "CI runner admission failed: the host RAM+swap budget is unreadable." >&2
     return 1
+  fi
+  if (( minimum == 0 )); then
+    echo "Host memory budget: ${budget} MB of RAM+swap; the minimum is explicitly disabled (RUNNER_MIN_MEMORY_MB=0)."
+    return 0
   fi
   if (( budget < minimum )); then
     echo "CI runner admission failed: ${budget} MB of RAM+swap is below the required ${minimum} MB; large installs will be OOM-killed mid-job." >&2
@@ -441,23 +452,30 @@ run_memory_admission_check() {
   echo "Host memory budget: ${budget} MB of RAM+swap (minimum ${minimum} MB)."
 }
 
-# Reads a kernel log on stdin. Reporting only: the kills it finds already happened, and
-# the point is that the next job log names them instead of leaving a silent restart.
-parse_oom_kill_report() {
-  local log kills last_task
+# The kernel's own cumulative kill counter, not the kernel log: the runner container is
+# unprivileged and the hosts set kernel.dmesg_restrict=1, so `dmesg` is denied here and a
+# dmesg-based post-mortem would report "no kills" on a host that had just been killed.
+# /proc/vmstat is world-readable and reflects the host, at the cost of the task name.
+parse_oom_kill_count() {
+  local vmstat="$1" count
 
-  log="$(grep 'oom-kill:' || true)"
-  [[ -n "${log}" ]] || return 0
+  [[ -r "${vmstat}" ]] || return 1
+  count="$(awk '/^oom_kill /  { print $2; exit }' "${vmstat}")"
+  [[ "${count}" =~ ^[0-9]+$ ]] || return 1
 
-  kills="$(printf '%s\n' "${log}" | wc -l | tr -d ' ')"
-  last_task="$(printf '%s\n' "${log}" | tail -1 | sed -n 's/.*task=\(.*\),pid=.*/\1/p')"
-
-  echo "OOM WARNING: the kernel out-of-memory killer terminated ${kills} process(es) on this host; most recent task: ${last_task:-unknown}." >&2
+  echo "${count}"
 }
 
 report_prior_oom_kills() {
-  command -v dmesg >/dev/null 2>&1 || return 0
-  dmesg 2>/dev/null | parse_oom_kill_report || true
+  local count
+
+  if ! count="$(parse_oom_kill_count /proc/vmstat)"; then
+    echo "OOM post-mortem unavailable: /proc/vmstat reports no oom_kill counter, so a prior kill on this host cannot be ruled out." >&2
+    return 0
+  fi
+  (( count > 0 )) || return 0
+
+  echo "OOM WARNING: the kernel out-of-memory killer has terminated ${count} process(es) on this host since boot; a job or listener that vanished without a log was most likely killed here." >&2
 }
 
 # Capacity is not a label claim, so it is proven for every runner rather than only the
@@ -565,14 +583,21 @@ cleanup() {
 }
 
 main() {
-  consume_github_pat || return 1
+  # The standalone `ci` probe reports on the image's toolchain, so it stays a pure
+  # capability matrix and says nothing about the host it happens to run on.
   if [[ "${1:-}" == "ci" ]]; then
+    consume_github_pat || return 1
     attest_ci_runner
     return $?
   fi
+
+  # Every path that can end in this runner accepting work proves host capacity first,
+  # ahead of consume_github_pat: that read destroys the one-use PAT FIFO, so proving
+  # capacity afterwards would make a rejected host re-stage its secret before retrying.
+  attest_host_capacity || return 1
+  consume_github_pat || return 1
   if [[ "${1:-}" == "admit" ]]; then
     initialize_runner_labels || return 1
-    attest_host_capacity || return 1
     attest_runner_labels "${RUNNER_LABELS}"
     return $?
   fi
@@ -596,7 +621,6 @@ main() {
 
   # Advertising "ci" is a capability claim. Prove the complete contract before any
   # registration credential is minted or config.sh can make the runner schedulable.
-  attest_host_capacity || return 1
   attest_runner_labels "${RUNNER_LABELS}" || return 1
 
   # Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the
