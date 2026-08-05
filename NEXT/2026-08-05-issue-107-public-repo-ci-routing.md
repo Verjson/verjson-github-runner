@@ -12,6 +12,9 @@ public repository's jobs to that lane — a selector that no reachable runner co
 
 Repository-level runner variables now pin those jobs to `ubuntu-24.04`, and the generated
 privileged-merge caller was regenerated with the canonical generator for the same target
-because it hardcodes its labels rather than reading a variable. Admitting a public
-repository to a group of persistent shared runners was rejected as the alternative; see
+because it hardcodes its labels rather than reading a variable. A new `routing-guard` job
+asserts those variables, because the org workflows fall back to a hardcoded
+`["self-hosted","general"]` literal that queues rather than failing, so a deleted variable
+would otherwise restore the deadlock silently. Admitting a public repository to a group of
+persistent shared runners was rejected as the alternative; see
 [ADR 0003](docs/decisions/0003-public-repository-ci-routes-to-hosted-runners/README.md).
