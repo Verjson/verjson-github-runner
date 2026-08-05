@@ -11,6 +11,7 @@ on:
     paths:
       - Dockerfile
       - Dockerfile.pwsh
+      - docker-bake.hcl
       - images/**
       - entrypoint.sh
       - .github/workflows/image-build-check.yml
@@ -43,31 +44,21 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Plain `docker build` rather than docker/build-push-action: it uses the default
-      # buildx builder, which writes results into the local daemon image store, so the
-      # kind images below resolve `FROM gha-runner:pr-check-base` with no registry in
-      # the loop. amd64 only — a PR check catches source breakage, not arch drift; the
-      # multi-arch build stays in publish-images.yml.
-      - name: Build base image
-        run: |
-          docker build --platform linux/amd64 \
-            -f images/base.Dockerfile -t gha-runner:pr-check-base .
-      # Kinds are built on the base from this same commit, matching how publish-images.yml
-      # wires BASE_IMAGE, so a base change that breaks a kind fails here too.
-      - name: Build kind images on the just-built base
-        run: |
-          for kind in rust node python go; do
-            docker build --platform linux/amd64 \
-              -f "images/${kind}.Dockerfile" \
-              --build-arg "BASE_IMAGE=gha-runner:pr-check-base" \
-              -t "gha-runner:pr-check-${kind}" .
-          done
-      - name: Build pwsh variant on the just-built base
-        run: |
-          docker build --platform linux/amd64 \
-            -f Dockerfile.pwsh \
-            --build-arg "BASE_IMAGE=gha-runner:pr-check-base" \
-            -t gha-runner:pr-check-pwsh .
+      # The gha cache exporter only works on buildx's docker-container driver, so the
+      # builds below run through docker-bake.hcl, which wires each variant's BASE_IMAGE to
+      # the base target rather than to a tag in the local daemon image store that this
+      # driver cannot see. amd64 only — a PR check catches source breakage, not arch
+      # drift; the multi-arch build stays in publish-images.yml.
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      # One bake solve: the base is built once and the five variants that sit on it fan out
+      # concurrently, each still resolving BASE_IMAGE to that same-run base the way
+      # publish-images.yml wires it, so a base change that breaks a variant fails here too.
+      - name: Build the base image and every variant on it
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          files: docker-bake.hcl
+          source: .
+          targets: pr-check
 
   root:
     if: github.event_name == 'pull_request'
@@ -75,10 +66,15 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       # The root Dockerfile has its own FROM and pins, independent of images/base.Dockerfile,
       # so it can break on its own and is built in parallel.
       - name: Build root Dockerfile
-        run: docker build --platform linux/amd64 -f Dockerfile -t gha-runner:pr-check-root .
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          files: docker-bake.hcl
+          source: .
+          targets: root
   # Weekly/on-demand arm64 builds cover every architecture-specific pin: gh and Node in
   # the base plus PowerShell in its thin variant. Other kinds add no per-arch pins.
   base-and-pwsh-arm64:
@@ -89,13 +85,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Same QEMU pin as publish-images.yml, which is where the arm64 build otherwise runs.
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
-      - name: Build base image for arm64 under emulation
-        run: |
-          docker build --platform linux/arm64 \
-            -f images/base.Dockerfile -t gha-runner:cron-check-base-arm64 .
-      - name: Build pwsh variant for arm64 under emulation
-        run: |
-          docker build --platform linux/arm64 \
-            -f Dockerfile.pwsh \
-            --build-arg "BASE_IMAGE=gha-runner:cron-check-base-arm64" \
-            -t gha-runner:cron-check-pwsh-arm64 .
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Build the base image and the pwsh variant for arm64 under emulation
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        env:
+          PLATFORM: linux/arm64
+          # Cold on purpose. This job catches drift a cache key cannot see — an upstream
+          # re-release under an unchanged version, or an arm64-only package gap — where the
+          # Dockerfile is byte-identical. Reading the cache would turn the
+          # `curl | sha256sum -c` layer into a hit, so the checksum this job exists to
+          # verify would never re-run. Writing it would also clobber the amd64 index that
+          # publish-images.yml maintains in the same scope on refs/heads/main.
+          CACHE: "off"
+        with:
+          files: docker-bake.hcl
+          source: .
+          targets: arch-check

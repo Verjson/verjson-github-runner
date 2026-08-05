@@ -20,6 +20,8 @@ jobs:
         run: bash tests/setup_powershell_source_test.sh
       - name: Validate image publication provenance contract
         run: bash tests/publish_images_workflow_test.sh
+      - name: Validate pull request image build check contract
+        run: bash tests/image_build_check_workflow_test.sh
       - name: Prove ephemeral jobs receive fresh writable layers
         run: bash tests/ephemeral_supervisor_integration.sh
       - name: Canonical changelog contract holds

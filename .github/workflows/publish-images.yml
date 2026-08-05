@@ -50,8 +50,11 @@ jobs:
             ${{ env.IMAGE }}:base-${{ github.sha }}
             ${{ env.IMAGE }}:base
             ${{ env.IMAGE }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # One cache scope per image: BuildKit keys its gha cache index on the scope, so
+          # the six builds here shared one index and overwrote each other's. These are the
+          # scopes image-build-check.yml reads from this branch.
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
           sbom: true
           provenance: mode=max
       - name: Attest base image provenance
@@ -120,8 +123,12 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ matrix.kind }}-${{ github.sha }}
             ${{ env.IMAGE }}:${{ matrix.kind }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.kind }}
+          # mode=min, unlike the base above: a kind is a thin layer on a base that already
+          # has its own scope, and mode=max would re-export that whole base into each of
+          # the five kind scopes as well — the duplication that pushed this repository past
+          # GitHub's 10 GB cache quota, where entries evict each other.
+          cache-to: type=gha,mode=min,scope=${{ matrix.kind }}
           sbom: true
           provenance: mode=max
       - name: Attest kind image provenance
