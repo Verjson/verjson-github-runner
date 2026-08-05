@@ -1,6 +1,6 @@
 # GENERATED FILE — do not edit by hand.
 # Regenerate with:
-#   scripts/gen-privileged-merge-caller.sh '["ubuntu-24.04"]' > .github/workflows/ai-privileged-merge.yml
+#   scripts/gen-privileged-merge-caller.sh '["self-hosted","general"]' > .github/workflows/ai-privileged-merge.yml
 #
 # Thin caller for the canonical privileged merge (Verjson/.github). All trust
 # logic lives there; nothing here may re-implement it.
@@ -47,4 +47,4 @@ jobs:
       # anti-TOCTOU binding to the head the gate actually attested.
       expected_head_sha: ${{ github.event.pull_request.head.sha || inputs.expected_head_sha }}
       source_run_id: ${{ inputs.source_run_id }}
-      runner_labels: '["ubuntu-24.04"]'
+      runner_labels: '["self-hosted","general"]'
