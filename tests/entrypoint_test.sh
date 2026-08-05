@@ -642,6 +642,8 @@ echo "Test 23: ephemeral supervisor child lifecycle"
   RUNNER_IMAGE="gha-runner:test"
   RUNNER_EPHEMERAL=true
   RUNNER_EPHEMERAL_MAX_JOBS=2
+  # Low enough to admit any host running this suite; the point is that it propagates.
+  RUNNER_MIN_MEMORY_MB=1024
 
   supervise_ephemeral >/dev/null
   run_count="$(grep -c '^run --rm ' "${docker_log}")"
@@ -654,6 +656,7 @@ echo "Test 23: ephemeral supervisor child lifecycle"
   assert_contains "job-token-2" "$(< "${token_log}")" "Streams a distinct one-shot token to the next child"
   assert_not_contains "job-token-" "$(< "${docker_log}")" "Keeps one-shot tokens out of Docker argv and inspect metadata"
   assert_contains "RUNNER_TOKEN_STDIN=1" "$(< "${docker_log}")" "Uses the non-metadata stdin token channel"
+  assert_contains "RUNNER_MIN_MEMORY_MB=1024" "$(< "${docker_log}")" "Gives the child the supervisor's own memory threshold"
   assert_not_contains "GITHUB_PAT=" "$(< "${docker_log}")" "Does not expose the renewable PAT to job children"
   assert_not_contains "RUNNER_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose the token-mint command to job children"
   assert_not_contains "RUNNER_REMOVE_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose removal credentials to job children"
@@ -1289,14 +1292,32 @@ echo "Test 41: memory headroom admission"
   set -e
   assert_eq "1" "${status}" "Rejects a zero-padded minimum that would silently parse as octal 8"
 
+  # Past 2^63 a value wraps negative inside (( )) with no error at all, which would make
+  # `budget < minimum` false and admit every host.
   host_memory_budget_mb() { echo "512"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=9223372036854775808 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a minimum wide enough to wrap the arithmetic"
+  assert_not_contains "Host memory budget:" "${output}" "Does not report success for an out-of-range minimum"
+
   set +e
   output="$(RUNNER_MIN_MEMORY_MB=0 run_memory_admission_check 2>&1)"
   status=$?
   set -e
   assert_eq "0" "${status}" "Treats an explicit zero minimum as an opt-out"
   assert_contains "explicitly disabled" "${output}" "Says the minimum was disabled rather than met"
+
+  # The opt-out must not then be defeated by an unreadable budget.
+  host_memory_budget_mb() { return 1; }
+  set +e
+  RUNNER_MIN_MEMORY_MB=0 run_memory_admission_check >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "Honours the opt-out even when the budget is unreadable"
 )
+
 
 # -----------------------------------------------------------------------------
 # Test 42: a prior kernel OOM kill is reported explicitly, not as a lost log
@@ -1403,6 +1424,24 @@ echo "Test 44: supervisor proves host capacity outside the job loop"
   assert_eq "1" "${status}" "Supervision fails closed on an undersized host"
   assert_eq "memory" "$(< "${order_log}")" \
     "Never enters the job loop, so no token is minted per retry"
+)
+
+# -----------------------------------------------------------------------------
+# Test 45: the standalone ci probe still consumes its PAT FIFO
+# -----------------------------------------------------------------------------
+echo "Test 45: ci admission keeps the one-use PAT transport"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/ci_pat_order.log"
+
+  consume_github_pat() { echo "consume-pat" >> "${order_log}"; }
+  attest_host_capacity() { echo "capacity" >> "${order_log}"; }
+  attest_ci_runner() { echo "ci" >> "${order_log}"; }
+
+  main ci >/dev/null 2>&1
+
+  assert_eq $'consume-pat\nci' "$(< "${order_log}")" \
+    "Consumes the PAT then attests, without imposing a host check on an image probe"
 )
 
 echo "-----------------------------------------------------------------------------"

@@ -251,6 +251,11 @@ supervise_ephemeral() {
     append_child_env https_proxy
     append_child_env http_proxy
     append_child_env no_proxy
+    # The child re-proves host capacity on its ordinary registration path. Without the
+    # override it would evaluate a different threshold from the supervisor that admitted
+    # it, and a child that rejects itself after the token is minted turns into one fresh
+    # registration per retry rather than a single refusal.
+    append_child_env RUNNER_MIN_MEMORY_MB
     if [[ "${RUNNER_CHILD_MOUNT_SOCK:-0}" == 1 ]]; then
       child_runtime_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
     fi
@@ -429,20 +434,23 @@ host_memory_budget_mb() {
 run_memory_admission_check() {
   local minimum="${RUNNER_MIN_MEMORY_MB:-${DEFAULT_MIN_MEMORY_MB}}" budget
 
-  # Leading zeros are rejected rather than tolerated: `(( ))` reads 08192 as octal, fails,
-  # and a failed comparison would read as "not below the minimum" — admitting every host
-  # while logging success. A zero-padded megabyte count is a plausible operator typo.
-  if [[ ! "${minimum}" =~ ^([1-9][0-9]*|0)$ ]]; then
-    echo "CI runner admission failed: RUNNER_MIN_MEMORY_MB must be a whole number of megabytes without leading zeros; found ${minimum}." >&2
+  # Both bounds exist because a malformed minimum must not silently admit everything.
+  # Leading zeros: `(( ))` reads 08192 as octal and errors, and a failed comparison reads
+  # as "not below the minimum". Width: a value past 2^63 wraps negative inside `(( ))`
+  # without any error at all. Seven digits is ~9.5 TB, well past any real host.
+  if [[ ! "${minimum}" =~ ^([1-9][0-9]{0,6}|0)$ ]]; then
+    echo "CI runner admission failed: RUNNER_MIN_MEMORY_MB must be a whole number of megabytes, at most 7 digits and without leading zeros; found ${minimum}." >&2
     return 1
+  fi
+  # Ahead of reading the budget, so an operator who has explicitly opted out is not then
+  # rejected for an unreadable /proc/meminfo.
+  if (( minimum == 0 )); then
+    echo "Host memory budget check is explicitly disabled (RUNNER_MIN_MEMORY_MB=0)."
+    return 0
   fi
   if ! budget="$(host_memory_budget_mb)"; then
     echo "CI runner admission failed: the host RAM+swap budget is unreadable." >&2
     return 1
-  fi
-  if (( minimum == 0 )); then
-    echo "Host memory budget: ${budget} MB of RAM+swap; the minimum is explicitly disabled (RUNNER_MIN_MEMORY_MB=0)."
-    return 0
   fi
   if (( budget < minimum )); then
     echo "CI runner admission failed: ${budget} MB of RAM+swap is below the required ${minimum} MB; large installs will be OOM-killed mid-job." >&2
