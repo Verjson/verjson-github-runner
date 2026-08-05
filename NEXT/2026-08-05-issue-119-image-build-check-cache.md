@@ -17,12 +17,17 @@ BuildKit builds the base once and fans the five variants out concurrently, so th
 clock collapses toward the slowest variant instead of their sum. The weekly emulated leg is
 the same shape over an `arch-check` group.
 
-Each image also gets its own cache scope, here and in `publish-images.yml`. BuildKit keys
-its gha cache index on the scope alone, so the builds sharing the default scope had been
-overwriting each other's index — the publication workflow's six concurrent jobs included.
-Adding the cache without that fix measured *slower*, not faster: a warm re-run of an
-unchanged commit got zero layer hits and still paid the export. The scope names match on
-both sides so a pull request inherits what `main` published.
+Two cache defects had to be fixed on both sides for any of that to pay, because adding the
+cache alone measured *slower* than the uncached baseline. BuildKit keys its gha cache index
+on the scope alone, so every build writing the default scope overwrote the previous index —
+`publish-images.yml`'s six concurrent jobs included, which is why the cache it was
+supposedly populating was never usable. Each image now reads and writes its own scope, with
+the names matched on both sides so a pull request inherits what `main` published. And a
+variant now exports `mode=min` rather than `mode=max`: it is a thin layer on a base that
+already has a scope of its own, so `mode=max` re-exported the whole 508 MB base into each
+of the five variant scopes as well. That cost more than rebuilding the variant outright
+(rust: 28s to build, 53s to export) and is what pushed this repository's Actions cache past
+GitHub's 10 GB quota, where entries evict each other.
 
 Bake rather than `docker/build-push-action` because the gha cache exporter only works on
 buildx's `docker-container` driver, and that driver cannot resolve a tag from the local

@@ -77,7 +77,7 @@ assert_count 2 'create-storage-record: false'
 assert_count 1 'cache-from: type=gha,scope=base'
 assert_count 1 'cache-to: type=gha,mode=max,scope=base'
 assert_count 1 'cache-from: type=gha,scope=${{ matrix.kind }}'
-assert_count 1 'cache-to: type=gha,mode=max,scope=${{ matrix.kind }}'
+assert_count 1 'cache-to: type=gha,mode=min,scope=${{ matrix.kind }}'
 
 assert_count 2 'sbom: true'
 assert_count 2 'provenance: mode=max'

@@ -34,7 +34,9 @@ bakefile_text="$(<"${bakefile}")"
 [[ "${bakefile_text}" == *'result = ["type=gha,scope=${scope}"]'* ]] \
   || fail "cache reads are not gha cache reads"
 [[ "${bakefile_text}" == *'result = ["type=gha,mode=max,scope=${scope}"]'* ]] \
-  || fail "cache writes are not gha mode=max cache writes"
+  || fail "root image cache writes are not gha mode=max cache writes"
+[[ "${bakefile_text}" == *'result = ["type=gha,mode=min,scope=${scope}"]'* ]] \
+  || fail "variant cache writes are not gha mode=min cache writes"
 
 # One scope per image. BuildKit keys its gha cache index on the scope alone, so builds
 # sharing the default scope overwrite each other's index: seven builds against one scope
@@ -48,8 +50,18 @@ while IFS= read -r target; do
     || fail "target '${target}' does not inherit the shared build settings"
   [[ "${block}" == *"cache-from = cache_from(\"${target}\")"* ]] \
     || fail "target '${target}' does not read its own cache scope"
-  [[ "${block}" == *"cache-to   = cache_to(\"${target}\")"* ]] \
-    || fail "target '${target}' does not write its own cache scope"
+  case "${target}" in
+    # A variant is a thin layer whose parent already has a scope of its own. Exporting it
+    # mode=max re-exports the whole 508 MB base into the variant's scope as well, which
+    # cost more than rebuilding the variant and is what pushed the repository past its
+    # 10 GB cache quota into self-eviction.
+    base | root)
+      [[ "${block}" == *"cache-to   = cache_to_full(\"${target}\")"* ]] \
+        || fail "root image '${target}' does not export its full layer cache" ;;
+    *)
+      [[ "${block}" == *"cache-to   = cache_to_thin(\"${target}\")"* ]] \
+        || fail "variant '${target}' must not re-export its base's layers" ;;
+  esac
 done <<<"${targets}"
 
 # A raw `docker build` uses the default builder, which cannot export to the gha cache,

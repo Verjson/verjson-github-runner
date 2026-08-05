@@ -24,9 +24,18 @@ function "cache_from" {
   result = ["type=gha,scope=${scope}"]
 }
 
-function "cache_to" {
+function "cache_to_full" {
   params = [scope]
   result = ["type=gha,mode=max,scope=${scope}"]
+}
+
+# A variant is a thin layer on a base that already has a cache scope of its own. Exporting
+# it mode=max re-exports the whole 508 MB base into the variant's scope too, which measured
+# slower than rebuilding the variant outright (rust: 28s to build, 53s to export) and is
+# what pushed this repository past GitHub's 10 GB cache quota into evicting its own entries.
+function "cache_to_thin" {
+  params = [scope]
+  result = ["type=gha,mode=min,scope=${scope}"]
 }
 
 target "_common" {
@@ -37,7 +46,7 @@ target "_common" {
 target "base" {
   inherits   = ["_common"]
   cache-from = cache_from("base")
-  cache-to   = cache_to("base")
+  cache-to   = cache_to_full("base")
   dockerfile = "images/base.Dockerfile"
 }
 
@@ -47,7 +56,7 @@ target "base" {
 target "rust" {
   inherits   = ["_common"]
   cache-from = cache_from("rust")
-  cache-to   = cache_to("rust")
+  cache-to   = cache_to_thin("rust")
   dockerfile = "images/rust.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -56,7 +65,7 @@ target "rust" {
 target "node" {
   inherits   = ["_common"]
   cache-from = cache_from("node")
-  cache-to   = cache_to("node")
+  cache-to   = cache_to_thin("node")
   dockerfile = "images/node.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -65,7 +74,7 @@ target "node" {
 target "python" {
   inherits   = ["_common"]
   cache-from = cache_from("python")
-  cache-to   = cache_to("python")
+  cache-to   = cache_to_thin("python")
   dockerfile = "images/python.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -74,7 +83,7 @@ target "python" {
 target "go" {
   inherits   = ["_common"]
   cache-from = cache_from("go")
-  cache-to   = cache_to("go")
+  cache-to   = cache_to_thin("go")
   dockerfile = "images/go.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -83,7 +92,7 @@ target "go" {
 target "pwsh" {
   inherits   = ["_common"]
   cache-from = cache_from("pwsh")
-  cache-to   = cache_to("pwsh")
+  cache-to   = cache_to_thin("pwsh")
   dockerfile = "Dockerfile.pwsh"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -95,7 +104,7 @@ target "pwsh" {
 target "root" {
   inherits   = ["_common"]
   cache-from = cache_from("root")
-  cache-to   = cache_to("root")
+  cache-to   = cache_to_full("root")
   dockerfile = "Dockerfile"
 }
 
