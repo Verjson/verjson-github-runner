@@ -11,11 +11,14 @@ images and the pwsh variant one after another in a single job. `publish-images.y
 been populating `type=gha` on every push to `main` the whole time; the check simply never
 read it.
 
-Both builds now go through a new `docker-bake.hcl`, and every target reads `type=gha` and
-writes `type=gha,mode=max`. The pull request leg is one bake solve over a `pr-check` group:
+Both builds now go through a new `docker-bake.hcl`, and every target reads and writes a
+`type=gha` cache scope of its own. The pull request leg is one bake solve over a `pr-check` group:
 BuildKit builds the base once and fans the five variants out concurrently, so the wall
 clock collapses toward the slowest variant instead of their sum. The weekly emulated leg is
-the same shape over an `arch-check` group.
+the same shape over an `arch-check` group, but builds **cold** (`CACHE: "off"`): it exists to
+catch drift a cache key cannot see — an upstream re-release under an unchanged version, or
+an arm64-only package gap — and a cache hit on the `curl | sha256sum -c` layer would mean
+the checksum it is there to verify never re-runs.
 
 Two cache defects had to be fixed on both sides for any of that to pay, because adding the
 cache alone measured *slower* than the uncached baseline. BuildKit keys its gha cache index

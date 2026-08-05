@@ -14,19 +14,30 @@ variable "PLATFORM" {
   default = "linux/amd64"
 }
 
+# The scheduled arch-drift check must build cold. Its whole purpose is to catch breakage a
+# cache key cannot see — an upstream re-release under an unchanged version, or an arm64-only
+# package gap — where the Dockerfile is byte-identical and only the world changed. A cache
+# hit on the `curl | sha256sum -c` layer means the download and its checksum never re-run,
+# which is exactly the verification that job exists to perform. Set CACHE=off there.
+variable "CACHE" {
+  default = "gha"
+}
+
 # One cache scope per image, never the default shared one. BuildKit keys its gha cache
 # index on the scope, so concurrent builds sharing a scope overwrite each other's index:
 # with seven builds on the default scope a warm re-run of an unchanged commit got zero
 # layer hits. The scope names match the ones publish-images.yml writes on every push to
-# main, which is the cache a pull request inherits from its base branch.
+# main, which is the cache a pull request inherits from its base branch — except `root`,
+# which publish-images.yml never builds, so that scope is only ever warmed by earlier
+# pushes to the same pull request.
 function "cache_from" {
   params = [scope]
-  result = ["type=gha,scope=${scope}"]
+  result = CACHE == "gha" ? ["type=gha,scope=${scope}"] : []
 }
 
 function "cache_to_full" {
   params = [scope]
-  result = ["type=gha,mode=max,scope=${scope}"]
+  result = CACHE == "gha" ? ["type=gha,mode=max,scope=${scope}"] : []
 }
 
 # A variant is a thin layer on a base that already has a cache scope of its own. Exporting
@@ -35,7 +46,7 @@ function "cache_to_full" {
 # what pushed this repository past GitHub's 10 GB cache quota into evicting its own entries.
 function "cache_to_thin" {
   params = [scope]
-  result = ["type=gha,mode=min,scope=${scope}"]
+  result = CACHE == "gha" ? ["type=gha,mode=min,scope=${scope}"] : []
 }
 
 target "_common" {

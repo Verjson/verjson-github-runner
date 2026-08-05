@@ -90,6 +90,13 @@ jobs:
         uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         env:
           PLATFORM: linux/arm64
+          # Cold on purpose. This job catches drift a cache key cannot see — an upstream
+          # re-release under an unchanged version, or an arm64-only package gap — where the
+          # Dockerfile is byte-identical. Reading the cache would turn the
+          # `curl | sha256sum -c` layer into a hit, so the checksum this job exists to
+          # verify would never re-run. Writing it would also clobber the amd64 index that
+          # publish-images.yml maintains in the same scope on refs/heads/main.
+          CACHE: "off"
         with:
           files: docker-bake.hcl
           source: .

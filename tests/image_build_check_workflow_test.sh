@@ -31,11 +31,11 @@ hcl_target_names() {
 # that publish-images.yml populates on every push to main. Without it the check rebuilds
 # the base image from scratch for every derived image on every pull request.
 bakefile_text="$(<"${bakefile}")"
-[[ "${bakefile_text}" == *'result = ["type=gha,scope=${scope}"]'* ]] \
+[[ "${bakefile_text}" == *'["type=gha,scope=${scope}"]'* ]] \
   || fail "cache reads are not gha cache reads"
-[[ "${bakefile_text}" == *'result = ["type=gha,mode=max,scope=${scope}"]'* ]] \
+[[ "${bakefile_text}" == *'["type=gha,mode=max,scope=${scope}"]'* ]] \
   || fail "root image cache writes are not gha mode=max cache writes"
-[[ "${bakefile_text}" == *'result = ["type=gha,mode=min,scope=${scope}"]'* ]] \
+[[ "${bakefile_text}" == *'["type=gha,mode=min,scope=${scope}"]'* ]] \
   || fail "variant cache writes are not gha mode=min cache writes"
 
 # One scope per image. BuildKit keys its gha cache index on the scope alone, so builds
@@ -133,6 +133,28 @@ for target in base pwsh; do
 done
 [[ "$(grep -Fc 'PLATFORM: linux/arm64' "${workflow}")" == "1" ]] \
   || fail "arm64 leg must override the build platform exactly once"
+
+# linux/arm64 means nothing on an amd64 host without emulation: drop the QEMU setup and the
+# leg silently builds amd64 while claiming to check arm64.
+arm64_job="$(awk '
+  /^  base-and-pwsh-arm64:/ { capture = 1; next }
+  capture && /^  [a-z]/ { exit }
+  capture { print }
+' "${workflow}")"
+[[ "${arm64_job}" == *"docker/setup-qemu-action"* ]] \
+  || fail "arm64 leg must install QEMU or it does not actually build arm64"
+
+# The scheduled leg exists to catch drift a cache key cannot see — an upstream re-release
+# under an unchanged version. Reading the cache turns the checksum layer into a hit, so the
+# verification never runs; writing it clobbers the amd64 index publish-images.yml maintains
+# in the same scope on refs/heads/main.
+[[ "${arm64_job}" == *'CACHE: "off"'* ]] \
+  || fail "arm64 leg must build cold, or its checksum verification never re-runs"
+
+# The pull request leg must stay amd64-only: widening the default would silently turn every
+# pull request into an emulated multi-arch build.
+[[ "$(awk '/^variable "PLATFORM" \{/{c=1;next} c&&/^\}/{exit} c' "${bakefile}")" == *'default = "linux/amd64"'* ]] \
+  || fail "PLATFORM must default to linux/amd64 so pull requests do not build under emulation"
 
 # Build-only is a property of this check, not an accident of how it was written: it holds
 # no registry credential and touches no tag, so it can run on a fork pull request.
