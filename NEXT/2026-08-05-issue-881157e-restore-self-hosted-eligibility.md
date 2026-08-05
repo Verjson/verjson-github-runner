@@ -1,6 +1,6 @@
 ---
 date: 2026-08-05
-issue: 107
+id: 881157e
 title: Restore this repository's eligibility for the shared self-hosted lane
 ---
 
