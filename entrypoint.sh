@@ -18,6 +18,11 @@ set -euo pipefail
 #   RUNNER_CHILD_NETWORK — supervisor mode only; metadata-denying Docker network for untrusted jobs
 #   RUNNER_METADATA_DENY_ATTEST_CMD — command that attests child metadata denial
 #   RUNNER_EPHEMERAL_MAX_JOBS — supervisor test/canary bound; 0 means supervise forever
+#   RUNNER_MIN_MEMORY_MB — optional, RAM+swap a host must offer to be admitted (defaults to 6144)
+
+# 6 GB clears the shared lane's 4 GB RAM + 4 GB swap while still rejecting the swapless
+# 4 GB host whose kernel killed a 1,978-package `npm ci` mid-install.
+DEFAULT_MIN_MEMORY_MB=6144
 
 normalize_ephemeral_mode() {
   local value="${RUNNER_EPHEMERAL:-false}"
@@ -397,6 +402,71 @@ run_python_admission_check() {
   require_minimum_version "Python" "3.10" "${version#Python }" "${version}"
 }
 
+# A kernel OOM kill lands on the job process or the listener itself, so GitHub reports
+# a cancelled step or an absent log rather than a memory fault. Swap counts toward the
+# survival margin: the same lockfile that killed a 4 GB swapless host installs fine once
+# the host can page. Reading the budget from a path keeps the parse testable.
+parse_memory_budget_mb() {
+  local meminfo="$1" mem_kb swap_kb
+
+  [[ -r "${meminfo}" ]] || return 1
+  mem_kb="$(awk '/^MemTotal:/ { print $2; exit }' "${meminfo}")"
+  swap_kb="$(awk '/^SwapTotal:/ { print $2; exit }' "${meminfo}")"
+  [[ "${mem_kb}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${swap_kb}" =~ ^[0-9]+$ ]] || swap_kb=0
+
+  echo $(( (mem_kb + swap_kb) / 1024 ))
+}
+
+host_memory_budget_mb() {
+  parse_memory_budget_mb /proc/meminfo
+}
+
+run_memory_admission_check() {
+  local minimum="${RUNNER_MIN_MEMORY_MB:-${DEFAULT_MIN_MEMORY_MB}}" budget
+
+  if [[ ! "${minimum}" =~ ^[0-9]+$ ]]; then
+    echo "CI runner admission failed: RUNNER_MIN_MEMORY_MB must be a whole number of megabytes; found ${minimum}." >&2
+    return 1
+  fi
+  if ! budget="$(host_memory_budget_mb)"; then
+    echo "CI runner admission failed: the host RAM+swap budget is unreadable." >&2
+    return 1
+  fi
+  if (( budget < minimum )); then
+    echo "CI runner admission failed: ${budget} MB of RAM+swap is below the required ${minimum} MB; large installs will be OOM-killed mid-job." >&2
+    return 1
+  fi
+
+  echo "Host memory budget: ${budget} MB of RAM+swap (minimum ${minimum} MB)."
+}
+
+# Reads a kernel log on stdin. Reporting only: the kills it finds already happened, and
+# the point is that the next job log names them instead of leaving a silent restart.
+parse_oom_kill_report() {
+  local log kills last_task
+
+  log="$(grep 'oom-kill:' || true)"
+  [[ -n "${log}" ]] || return 0
+
+  kills="$(printf '%s\n' "${log}" | wc -l | tr -d ' ')"
+  last_task="$(printf '%s\n' "${log}" | tail -1 | sed -n 's/.*task=\(.*\),pid=.*/\1/p')"
+
+  echo "OOM WARNING: the kernel out-of-memory killer terminated ${kills} process(es) on this host; most recent task: ${last_task:-unknown}." >&2
+}
+
+report_prior_oom_kills() {
+  command -v dmesg >/dev/null 2>&1 || return 0
+  dmesg 2>/dev/null | parse_oom_kill_report || true
+}
+
+# Capacity is not a label claim, so it is proven for every runner rather than only the
+# ones advertising a toolchain.
+attest_host_capacity() {
+  report_prior_oom_kills
+  run_memory_admission_check || return 1
+}
+
 attest_ci_runner() {
   echo "Attesting required ci runner capabilities..."
   run_admission_check "GitHub CLI" gh --version || return 1
@@ -502,6 +572,7 @@ main() {
   fi
   if [[ "${1:-}" == "admit" ]]; then
     initialize_runner_labels || return 1
+    attest_host_capacity || return 1
     attest_runner_labels "${RUNNER_LABELS}"
     return $?
   fi
@@ -525,6 +596,7 @@ main() {
 
   # Advertising "ci" is a capability claim. Prove the complete contract before any
   # registration credential is minted or config.sh can make the runner schedulable.
+  attest_host_capacity || return 1
   attest_runner_labels "${RUNNER_LABELS}" || return 1
 
   # Proxy support: curl below and the runner itself honor HTTP(S)_PROXY / NO_PROXY from the

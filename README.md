@@ -407,6 +407,13 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
     bypass startup admission; advertising exact `pwsh` independently requires working
     PowerShell before registration.
+  - `RUNNER_MIN_MEMORY_MB` — RAM+swap a host must offer before it may register
+    (defaults to `6144`). Unlike the label checks above this is proven for **every**
+    runner, because memory exhaustion is not a capability claim: a host that cannot
+    survive a large dependency install has its job — or its listener — killed by the
+    kernel, which surfaces on GitHub as a cancelled step or a missing log rather than
+    as a memory fault. Registration additionally reports any prior kernel OOM kill so
+    the cause is named in the job log.
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
   plugins. To let workflows use them, mount the host socket at run time
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in

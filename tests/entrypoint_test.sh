@@ -1182,6 +1182,109 @@ echo "Test 39: credential-free candidate admission dispatch"
   assert_eq $'ci\npwsh' "$(< "${admission_log}")" "Candidate dispatch admits both exact capability labels"
 )
 
+# -----------------------------------------------------------------------------
+# Test 40: the host memory budget counts swap toward the OOM survival margin
+# -----------------------------------------------------------------------------
+echo "Test 40: memory budget parsing"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  meminfo="${TMP_DIR}/meminfo"
+
+  printf 'MemTotal:        4009876 kB\nSwapTotal:       4194300 kB\n' > "${meminfo}"
+  assert_eq "8011" "$(parse_memory_budget_mb "${meminfo}")" "Sums RAM and swap into a megabyte budget"
+
+  printf 'MemTotal:        4009876 kB\nSwapTotal:             0 kB\n' > "${meminfo}"
+  assert_eq "3915" "$(parse_memory_budget_mb "${meminfo}")" "Reports RAM alone when the host has no swap"
+
+  printf 'MemTotal:        4009876 kB\n' > "${meminfo}"
+  assert_eq "3915" "$(parse_memory_budget_mb "${meminfo}")" "Treats absent SwapTotal as zero swap"
+
+  set +e
+  parse_memory_budget_mb "${TMP_DIR}/missing-meminfo" >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed when the memory budget is unreadable"
+)
+
+# -----------------------------------------------------------------------------
+# Test 41: too little RAM+swap blocks admission instead of dying mid-job
+# -----------------------------------------------------------------------------
+echo "Test 41: memory headroom admission"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+
+  host_memory_budget_mb() { echo "8012"; }
+  output="$(RUNNER_MIN_MEMORY_MB=6144 run_memory_admission_check 2>&1)"
+  assert_eq "0" "$?" "Admits a host whose RAM+swap clears the minimum"
+  assert_contains "8012 MB" "${output}" "Reports the observed budget"
+
+  host_memory_budget_mb() { echo "3916"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=6144 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects the 4 GB no-swap host that OOM-killed npm ci"
+  assert_contains "3916 MB" "${output}" "Names the deficient budget"
+  assert_contains "6144 MB" "${output}" "Names the required minimum"
+
+  host_memory_budget_mb() { echo "8012"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=not-a-number run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed on a non-numeric minimum"
+)
+
+# -----------------------------------------------------------------------------
+# Test 42: a prior kernel OOM kill is reported explicitly, not as a lost log
+# -----------------------------------------------------------------------------
+echo "Test 42: OOM kill post-mortem reporting"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+
+  output="$(printf '%s\n' \
+    '[12345.6] sshd invoked oom-killer: gfp_mask=0x140cca' \
+    '[12345.7] oom-kill:constraint=CONSTRAINT_NONE,global_oom,task=npm ci,pid=94868,uid=1000' \
+    | parse_oom_kill_report 2>&1)"
+  assert_contains "OOM" "${output}" "Announces the kill in greppable terms"
+  assert_contains "npm ci" "${output}" "Names the task the kernel killed"
+  assert_contains "1 " "${output}" "Counts the kills observed"
+
+  output="$(printf '%s\n' '[1.0] Linux version 6.8.0' | parse_oom_kill_report 2>&1)"
+  assert_eq "" "${output}" "Stays silent on a kernel log with no kills"
+
+  output="$(printf '%s\n' \
+    '[1.0] oom-kill:constraint=CONSTRAINT_NONE,task=node,pid=1,uid=1000' \
+    '[2.0] oom-kill:constraint=CONSTRAINT_NONE,task=npm ci,pid=2,uid=1000' \
+    | parse_oom_kill_report 2>&1)"
+  assert_contains "2 " "${output}" "Counts every kill in the window"
+  assert_contains "npm ci" "${output}" "Reports the most recent killed task"
+)
+
+# -----------------------------------------------------------------------------
+# Test 43: registration proves host capacity before minting a credential
+# -----------------------------------------------------------------------------
+echo "Test 43: host capacity admission precedes registration"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/capacity_order.log"
+  RUNNER_LABELS="self-hosted,general"
+  unset GITHUB_URL GITHUB_PAT RUNNER_TOKEN RUNNER_TOKEN_CMD || true
+
+  report_prior_oom_kills() { echo "oom-report" >> "${order_log}"; }
+  run_memory_admission_check() { echo "memory" >> "${order_log}"; return 1; }
+  attest_ci_runner() { echo "ci" >> "${order_log}"; }
+  attest_pwsh_runner() { echo "pwsh" >> "${order_log}"; }
+
+  set +e
+  main admit >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "A deficient host fails candidate admission"
+  assert_contains "memory" "$(< "${order_log}")" "Runs the memory check during admission"
+)
+
 echo "-----------------------------------------------------------------------------"
 passed_count=$(find "${TMP_DIR}" -name 'passed_*' | wc -l | tr -d ' ')
 failed_count=$(find "${TMP_DIR}" -name 'failed_*' | wc -l | tr -d ' ')
