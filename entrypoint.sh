@@ -18,6 +18,11 @@ set -euo pipefail
 #   RUNNER_CHILD_NETWORK — supervisor mode only; metadata-denying Docker network for untrusted jobs
 #   RUNNER_METADATA_DENY_ATTEST_CMD — command that attests child metadata denial
 #   RUNNER_EPHEMERAL_MAX_JOBS — supervisor test/canary bound; 0 means supervise forever
+#   RUNNER_MIN_MEMORY_MB — optional, RAM+swap a host must offer to be admitted (defaults to 6144)
+
+# 6 GB clears the shared lane's 4 GB RAM + 4 GB swap while still rejecting the swapless
+# 4 GB host whose kernel killed a 1,978-package `npm ci` mid-install.
+DEFAULT_MIN_MEMORY_MB=6144
 
 normalize_ephemeral_mode() {
   local value="${RUNNER_EPHEMERAL:-false}"
@@ -246,6 +251,11 @@ supervise_ephemeral() {
     append_child_env https_proxy
     append_child_env http_proxy
     append_child_env no_proxy
+    # The child re-proves host capacity on its ordinary registration path. Without the
+    # override it would evaluate a different threshold from the supervisor that admitted
+    # it, and a child that rejects itself after the token is minted turns into one fresh
+    # registration per retry rather than a single refusal.
+    append_child_env RUNNER_MIN_MEMORY_MB
     if [[ "${RUNNER_CHILD_MOUNT_SOCK:-0}" == 1 ]]; then
       child_runtime_args+=(-v /var/run/docker.sock:/var/run/docker.sock)
     fi
@@ -397,6 +407,92 @@ run_python_admission_check() {
   require_minimum_version "Python" "3.10" "${version#Python }" "${version}"
 }
 
+# A kernel OOM kill lands on the job process or the listener itself, so GitHub reports
+# a cancelled step or an absent log rather than a memory fault. Swap counts toward the
+# survival margin because the kills that prompted this were global host OOMs on hosts
+# with no page-out path at all; RAM+swap is a proxy for surviving a large install, not a
+# claim that swap specifically is required. Reads the host's figures — a container memory
+# limit is invisible here, so a capped container would over-report. Nothing in this fleet
+# sets one; a `--memory`/`mem_limit` would need this to take the tighter of the two.
+# Taking the path as an argument keeps the parse testable.
+parse_memory_budget_mb() {
+  local meminfo="$1" mem_kb swap_kb
+
+  [[ -r "${meminfo}" ]] || return 1
+  mem_kb="$(awk '/^MemTotal:/ { print $2; exit }' "${meminfo}")"
+  swap_kb="$(awk '/^SwapTotal:/ { print $2; exit }' "${meminfo}")"
+  [[ "${mem_kb}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${swap_kb}" =~ ^[0-9]+$ ]] || swap_kb=0
+
+  echo $(( (mem_kb + swap_kb) / 1024 ))
+}
+
+host_memory_budget_mb() {
+  parse_memory_budget_mb /proc/meminfo
+}
+
+run_memory_admission_check() {
+  local minimum="${RUNNER_MIN_MEMORY_MB:-${DEFAULT_MIN_MEMORY_MB}}" budget
+
+  # Both bounds exist because a malformed minimum must not silently admit everything.
+  # Leading zeros: `(( ))` reads 08192 as octal and errors, and a failed comparison reads
+  # as "not below the minimum". Width: a value past 2^63 wraps negative inside `(( ))`
+  # without any error at all. Seven digits is ~9.5 TB, well past any real host.
+  if [[ ! "${minimum}" =~ ^([1-9][0-9]{0,6}|0)$ ]]; then
+    echo "CI runner admission failed: RUNNER_MIN_MEMORY_MB must be a whole number of megabytes, at most 7 digits and without leading zeros; found ${minimum}." >&2
+    return 1
+  fi
+  # Ahead of reading the budget, so an operator who has explicitly opted out is not then
+  # rejected for an unreadable /proc/meminfo.
+  if (( minimum == 0 )); then
+    echo "Host memory budget check is explicitly disabled (RUNNER_MIN_MEMORY_MB=0)."
+    return 0
+  fi
+  if ! budget="$(host_memory_budget_mb)"; then
+    echo "CI runner admission failed: the host RAM+swap budget is unreadable." >&2
+    return 1
+  fi
+  if (( budget < minimum )); then
+    echo "CI runner admission failed: ${budget} MB of RAM+swap is below the required ${minimum} MB; large installs will be OOM-killed mid-job." >&2
+    return 1
+  fi
+
+  echo "Host memory budget: ${budget} MB of RAM+swap (minimum ${minimum} MB)."
+}
+
+# The kernel's own cumulative kill counter, not the kernel log: the runner container is
+# unprivileged and the hosts set kernel.dmesg_restrict=1, so `dmesg` is denied here and a
+# dmesg-based post-mortem would report "no kills" on a host that had just been killed.
+# /proc/vmstat is world-readable and reflects the host, at the cost of the task name.
+parse_oom_kill_count() {
+  local vmstat="$1" count
+
+  [[ -r "${vmstat}" ]] || return 1
+  count="$(awk '/^oom_kill /  { print $2; exit }' "${vmstat}")"
+  [[ "${count}" =~ ^[0-9]+$ ]] || return 1
+
+  echo "${count}"
+}
+
+report_prior_oom_kills() {
+  local count
+
+  if ! count="$(parse_oom_kill_count /proc/vmstat)"; then
+    echo "OOM post-mortem unavailable: /proc/vmstat reports no oom_kill counter, so a prior kill on this host cannot be ruled out." >&2
+    return 0
+  fi
+  (( count > 0 )) || return 0
+
+  echo "OOM WARNING: the kernel out-of-memory killer has terminated ${count} process(es) on this host since boot; a job or listener that vanished without a log was most likely killed here." >&2
+}
+
+# Capacity is not a label claim, so it is proven for every runner rather than only the
+# ones advertising a toolchain.
+attest_host_capacity() {
+  report_prior_oom_kills
+  run_memory_admission_check || return 1
+}
+
 attest_ci_runner() {
   echo "Attesting required ci runner capabilities..."
   run_admission_check "GitHub CLI" gh --version || return 1
@@ -495,11 +591,19 @@ cleanup() {
 }
 
 main() {
-  consume_github_pat || return 1
+  # The standalone `ci` probe reports on the image's toolchain, so it stays a pure
+  # capability matrix and says nothing about the host it happens to run on.
   if [[ "${1:-}" == "ci" ]]; then
+    consume_github_pat || return 1
     attest_ci_runner
     return $?
   fi
+
+  # Every path that can end in this runner accepting work proves host capacity first,
+  # ahead of consume_github_pat: that read destroys the one-use PAT FIFO, so proving
+  # capacity afterwards would make a rejected host re-stage its secret before retrying.
+  attest_host_capacity || return 1
+  consume_github_pat || return 1
   if [[ "${1:-}" == "admit" ]]; then
     initialize_runner_labels || return 1
     attest_runner_labels "${RUNNER_LABELS}"

@@ -642,6 +642,8 @@ echo "Test 23: ephemeral supervisor child lifecycle"
   RUNNER_IMAGE="gha-runner:test"
   RUNNER_EPHEMERAL=true
   RUNNER_EPHEMERAL_MAX_JOBS=2
+  # Low enough to admit any host running this suite; the point is that it propagates.
+  RUNNER_MIN_MEMORY_MB=1024
 
   supervise_ephemeral >/dev/null
   run_count="$(grep -c '^run --rm ' "${docker_log}")"
@@ -654,6 +656,7 @@ echo "Test 23: ephemeral supervisor child lifecycle"
   assert_contains "job-token-2" "$(< "${token_log}")" "Streams a distinct one-shot token to the next child"
   assert_not_contains "job-token-" "$(< "${docker_log}")" "Keeps one-shot tokens out of Docker argv and inspect metadata"
   assert_contains "RUNNER_TOKEN_STDIN=1" "$(< "${docker_log}")" "Uses the non-metadata stdin token channel"
+  assert_contains "RUNNER_MIN_MEMORY_MB=1024" "$(< "${docker_log}")" "Gives the child the supervisor's own memory threshold"
   assert_not_contains "GITHUB_PAT=" "$(< "${docker_log}")" "Does not expose the renewable PAT to job children"
   assert_not_contains "RUNNER_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose the token-mint command to job children"
   assert_not_contains "RUNNER_REMOVE_TOKEN_CMD=" "$(< "${docker_log}")" "Does not expose removal credentials to job children"
@@ -1180,6 +1183,265 @@ echo "Test 39: credential-free candidate admission dispatch"
   main admit
 
   assert_eq $'ci\npwsh' "$(< "${admission_log}")" "Candidate dispatch admits both exact capability labels"
+)
+
+# -----------------------------------------------------------------------------
+# Test 40: the host memory budget counts swap toward the OOM survival margin
+# -----------------------------------------------------------------------------
+echo "Test 40: memory budget parsing"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  meminfo="${TMP_DIR}/meminfo"
+
+  printf 'MemTotal:        4009876 kB\nSwapTotal:       4194300 kB\n' > "${meminfo}"
+  assert_eq "8011" "$(parse_memory_budget_mb "${meminfo}")" "Sums RAM and swap into a megabyte budget"
+
+  printf 'MemTotal:        4009876 kB\nSwapTotal:             0 kB\n' > "${meminfo}"
+  assert_eq "3915" "$(parse_memory_budget_mb "${meminfo}")" "Reports RAM alone when the host has no swap"
+
+  printf 'MemTotal:        4009876 kB\n' > "${meminfo}"
+  assert_eq "3915" "$(parse_memory_budget_mb "${meminfo}")" "Treats absent SwapTotal as zero swap"
+
+  set +e
+  parse_memory_budget_mb "${TMP_DIR}/missing-meminfo" >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed when the memory budget is unreadable"
+
+  printf 'SwapTotal:       4194300 kB\n' > "${meminfo}"
+  set +e
+  parse_memory_budget_mb "${meminfo}" >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed when MemTotal is absent"
+
+  printf 'MemTotal:        unknown kB\nSwapTotal:       4194300 kB\n' > "${meminfo}"
+  set +e
+  parse_memory_budget_mb "${meminfo}" >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed on a non-numeric MemTotal"
+)
+
+# -----------------------------------------------------------------------------
+# Test 41: too little RAM+swap blocks admission instead of dying mid-job
+# -----------------------------------------------------------------------------
+echo "Test 41: memory headroom admission"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+
+  # The live shared lane: 4 GB RAM + 4 GB swap.
+  host_memory_budget_mb() { echo "8011"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=6144 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "Admits a host whose RAM+swap clears the minimum"
+  assert_contains "8011 MB" "${output}" "Reports the observed budget"
+
+  # The default governs every production host, so it is exercised without an override.
+  set +e
+  output="$(unset RUNNER_MIN_MEMORY_MB; run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "Admits the live lane budget under the default minimum"
+  assert_contains "6144 MB" "${output}" "Defaults the minimum to 6144 MB"
+
+  host_memory_budget_mb() { echo "6144"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=6144 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "Admits a host exactly at the minimum"
+
+  host_memory_budget_mb() { echo "6143"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=6144 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a host one megabyte below the minimum"
+
+  # The swapless 4 GB configuration whose kernel killed npm ci.
+  host_memory_budget_mb() { echo "3915"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=6144 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects the 4 GB no-swap host that OOM-killed npm ci"
+  assert_contains "3915 MB" "${output}" "Names the deficient budget"
+  assert_contains "6144 MB" "${output}" "Names the required minimum"
+
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=not-a-number run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails closed on a non-numeric minimum"
+
+  # A zero-padded minimum would be read as octal by (( )), and the resulting error
+  # status reads as "not below the minimum" — admitting every host while logging success.
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=08192 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a zero-padded minimum instead of admitting on octal error"
+  assert_not_contains "Host memory budget:" "${output}" "Does not report success for a rejected minimum"
+
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=010 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a zero-padded minimum that would silently parse as octal 8"
+
+  # Past 2^63 a value wraps negative inside (( )) with no error at all, which would make
+  # `budget < minimum` false and admit every host.
+  host_memory_budget_mb() { echo "512"; }
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=9223372036854775808 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Rejects a minimum wide enough to wrap the arithmetic"
+  assert_not_contains "Host memory budget:" "${output}" "Does not report success for an out-of-range minimum"
+
+  set +e
+  output="$(RUNNER_MIN_MEMORY_MB=0 run_memory_admission_check 2>&1)"
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "Treats an explicit zero minimum as an opt-out"
+  assert_contains "explicitly disabled" "${output}" "Says the minimum was disabled rather than met"
+
+  # The opt-out must not then be defeated by an unreadable budget.
+  host_memory_budget_mb() { return 1; }
+  set +e
+  RUNNER_MIN_MEMORY_MB=0 run_memory_admission_check >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "Honours the opt-out even when the budget is unreadable"
+)
+
+
+# -----------------------------------------------------------------------------
+# Test 42: a prior kernel OOM kill is reported explicitly, not as a lost log
+# -----------------------------------------------------------------------------
+echo "Test 42: OOM kill post-mortem reporting"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  vmstat="${TMP_DIR}/vmstat"
+
+  printf 'nr_free_pages 12345\noom_kill 2\npgfault 99\n' > "${vmstat}"
+  assert_eq "2" "$(parse_oom_kill_count "${vmstat}")" "Reads the kernel's cumulative kill counter"
+
+  printf 'nr_free_pages 12345\noom_kill 0\n' > "${vmstat}"
+  assert_eq "0" "$(parse_oom_kill_count "${vmstat}")" "Reads a clean host as zero kills"
+
+  # oom_kill_process is a different, adjacent counter; a prefix match would misreport.
+  printf 'oom_kill_process 7\noom_kill 3\n' > "${vmstat}"
+  assert_eq "3" "$(parse_oom_kill_count "${vmstat}")" "Does not match an adjacent counter name"
+
+  printf 'nr_free_pages 12345\n' > "${vmstat}"
+  set +e
+  parse_oom_kill_count "${vmstat}" >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails when the counter is absent"
+
+  set +e
+  parse_oom_kill_count "${TMP_DIR}/missing-vmstat" >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_eq "1" "${status}" "Fails when the counter file is unreadable"
+
+  parse_oom_kill_count() { echo "2"; }
+  output="$(report_prior_oom_kills 2>&1)"
+  assert_contains "OOM WARNING" "${output}" "Announces prior kills in greppable terms"
+  assert_contains "terminated 2 process(es)" "${output}" "States the exact kill count"
+
+  parse_oom_kill_count() { echo "0"; }
+  assert_eq "" "$(report_prior_oom_kills 2>&1)" "Stays silent on a host with no kills"
+
+  # The path a locked-down host takes: silence here must not read as "no kills".
+  parse_oom_kill_count() { return 1; }
+  set +e
+  output="$(report_prior_oom_kills 2>&1)"
+  status=$?
+  set -e
+  assert_eq "0" "${status}" "An unreadable counter does not fail admission"
+  assert_contains "unavailable" "${output}" "Reports that the post-mortem could not run"
+  assert_not_contains "OOM WARNING" "${output}" "Does not claim kills it could not observe"
+)
+
+# -----------------------------------------------------------------------------
+# Test 43: registration proves host capacity before minting a credential
+# -----------------------------------------------------------------------------
+echo "Test 43: host capacity is proven before any credential is touched"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/capacity_order.log"
+  RUNNER_LABELS="self-hosted,general"
+  GITHUB_URL="https://github.com/Verjson"
+  GITHUB_PAT_FIFO="${TMP_DIR}/pat.fifo"
+  RUNNER_DIR="${TMP_DIR}"
+
+  report_prior_oom_kills() { echo "oom-report" >> "${order_log}"; }
+  run_memory_admission_check() { echo "memory" >> "${order_log}"; return 1; }
+  consume_github_pat() { echo "consume-pat" >> "${order_log}"; }
+  resolve_token() { echo "resolve-token" >> "${order_log}"; }
+  attest_runner_labels() { echo "labels" >> "${order_log}"; }
+
+  set +e
+  main >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "A deficient host fails before registering"
+  assert_eq $'oom-report\nmemory' "$(< "${order_log}")" \
+    "Reports OOM history then rejects, touching neither the PAT FIFO nor a token"
+)
+
+# -----------------------------------------------------------------------------
+# Test 44: an undersized host is rejected once, not per supervised job
+# -----------------------------------------------------------------------------
+echo "Test 44: supervisor proves host capacity outside the job loop"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/supervisor_capacity.log"
+  RUNNER_IMAGE="gha-runner:base"
+  RUNNER_NAME="probe"
+  GITHUB_URL="https://github.com/Verjson"
+  GITHUB_PAT="pat"
+  RUNNER_EPHEMERAL="true"
+  RUNNER_LABELS="self-hosted,untrusted-pr"
+
+  run_memory_admission_check() { echo "memory" >> "${order_log}"; return 1; }
+  report_prior_oom_kills() { :; }
+  supervise_ephemeral() { echo "supervise" >> "${order_log}"; }
+  resolve_token() { echo "token" >> "${order_log}"; }
+
+  set +e
+  main supervise >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Supervision fails closed on an undersized host"
+  assert_eq "memory" "$(< "${order_log}")" \
+    "Never enters the job loop, so no token is minted per retry"
+)
+
+# -----------------------------------------------------------------------------
+# Test 45: the standalone ci probe still consumes its PAT FIFO
+# -----------------------------------------------------------------------------
+echo "Test 45: ci admission keeps the one-use PAT transport"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/ci_pat_order.log"
+
+  consume_github_pat() { echo "consume-pat" >> "${order_log}"; }
+  attest_host_capacity() { echo "capacity" >> "${order_log}"; }
+  attest_ci_runner() { echo "ci" >> "${order_log}"; }
+
+  main ci >/dev/null 2>&1
+
+  assert_eq $'consume-pat\nci' "$(< "${order_log}")" \
+    "Consumes the PAT then attests, without imposing a host check on an image probe"
 )
 
 echo "-----------------------------------------------------------------------------"
