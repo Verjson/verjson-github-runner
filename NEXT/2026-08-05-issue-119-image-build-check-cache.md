@@ -12,10 +12,17 @@ been populating `type=gha` on every push to `main` the whole time; the check sim
 read it.
 
 Both builds now go through a new `docker-bake.hcl`, and every target reads `type=gha` and
-writes `type=gha,mode=max`, matching publication exactly. The pull request leg is one bake
-solve over a `pr-check` group: BuildKit builds the base once and fans the five variants
-out concurrently, so the wall clock collapses toward the slowest variant instead of their
-sum. The weekly emulated leg is the same shape over an `arch-check` group.
+writes `type=gha,mode=max`. The pull request leg is one bake solve over a `pr-check` group:
+BuildKit builds the base once and fans the five variants out concurrently, so the wall
+clock collapses toward the slowest variant instead of their sum. The weekly emulated leg is
+the same shape over an `arch-check` group.
+
+Each image also gets its own cache scope, here and in `publish-images.yml`. BuildKit keys
+its gha cache index on the scope alone, so the builds sharing the default scope had been
+overwriting each other's index — the publication workflow's six concurrent jobs included.
+Adding the cache without that fix measured *slower*, not faster: a warm re-run of an
+unchanged commit got zero layer hits and still paid the export. The scope names match on
+both sides so a pull request inherits what `main` published.
 
 Bake rather than `docker/build-push-action` because the gha cache exporter only works on
 buildx's `docker-container` driver, and that driver cannot resolve a tag from the local

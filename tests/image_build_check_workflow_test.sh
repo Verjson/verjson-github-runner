@@ -30,19 +30,26 @@ hcl_target_names() {
 # Every image the check builds must read from and write to the same BuildKit layer cache
 # that publish-images.yml populates on every push to main. Without it the check rebuilds
 # the base image from scratch for every derived image on every pull request.
-common="$(hcl_block _common)"
-[[ "${common}" == *'cache-from = ["type=gha"]'* ]] \
-  || fail "shared target does not read the gha layer cache"
-[[ "${common}" == *'cache-to   = ["type=gha,mode=max"]'* ]] \
-  || fail "shared target does not write the gha layer cache with mode=max"
+bakefile_text="$(<"${bakefile}")"
+[[ "${bakefile_text}" == *'result = ["type=gha,scope=${scope}"]'* ]] \
+  || fail "cache reads are not gha cache reads"
+[[ "${bakefile_text}" == *'result = ["type=gha,mode=max,scope=${scope}"]'* ]] \
+  || fail "cache writes are not gha mode=max cache writes"
 
+# One scope per image. BuildKit keys its gha cache index on the scope alone, so builds
+# sharing the default scope overwrite each other's index: seven builds against one scope
+# left a warm re-run of an unchanged commit with zero layer hits.
 targets="$(hcl_target_names)"
 [[ -n "${targets}" ]] || fail "no bake targets found in ${bakefile}"
 while IFS= read -r target; do
   [[ "${target}" == "_common" ]] && continue
   block="$(hcl_block "${target}")"
   [[ "${block}" == *'inherits   = ["_common"]'* ]] \
-    || fail "target '${target}' does not inherit the cached build settings"
+    || fail "target '${target}' does not inherit the shared build settings"
+  [[ "${block}" == *"cache-from = cache_from(\"${target}\")"* ]] \
+    || fail "target '${target}' does not read its own cache scope"
+  [[ "${block}" == *"cache-to   = cache_to(\"${target}\")"* ]] \
+    || fail "target '${target}' does not write its own cache scope"
 done <<<"${targets}"
 
 # A raw `docker build` uses the default builder, which cannot export to the gha cache,
@@ -137,6 +144,11 @@ bake_steps="$(grep -Fc -- 'uses: docker/bake-action@' "${workflow}" || true)"
 [[ "${bake_steps}" -gt 0 ]] || fail "no bake build steps found"
 [[ "$(grep -Fc 'files: docker-bake.hcl' "${workflow}")" == "${bake_steps}" ]] \
   || fail "every bake step must name docker-bake.hcl instead of relying on file discovery"
+
+# bake-action defaults its source to the remote git context, which would silently ignore
+# the checkout and build a ref fetched from GitHub rather than the tree under test.
+[[ "$(grep -Fc 'source: .' "${workflow}")" == "${bake_steps}" ]] \
+  || fail "every bake step must build the checked-out workspace, not a remote git context"
 
 while IFS= read -r action; do
   [[ "${action}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$ ]] \

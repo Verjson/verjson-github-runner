@@ -57,6 +57,7 @@ jobs:
         uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         with:
           files: docker-bake.hcl
+          source: .
           targets: pr-check
 
   root:
@@ -72,6 +73,7 @@ jobs:
         uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         with:
           files: docker-bake.hcl
+          source: .
           targets: root
   # Weekly/on-demand arm64 builds cover every architecture-specific pin: gh and Node in
   # the base plus PowerShell in its thin variant. Other kinds add no per-arch pins.
@@ -90,4 +92,5 @@ jobs:
           PLATFORM: linux/arm64
         with:
           files: docker-bake.hcl
+          source: .
           targets: arch-check

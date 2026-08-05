@@ -14,18 +14,30 @@ variable "PLATFORM" {
   default = "linux/amd64"
 }
 
-# publish-images.yml writes `type=gha` on every push to main and a pull request may read
-# its base branch's caches, so reading the same scope is what keeps the check off a cold
-# rebuild of layers that have not changed in weeks.
+# One cache scope per image, never the default shared one. BuildKit keys its gha cache
+# index on the scope, so concurrent builds sharing a scope overwrite each other's index:
+# with seven builds on the default scope a warm re-run of an unchanged commit got zero
+# layer hits. The scope names match the ones publish-images.yml writes on every push to
+# main, which is the cache a pull request inherits from its base branch.
+function "cache_from" {
+  params = [scope]
+  result = ["type=gha,scope=${scope}"]
+}
+
+function "cache_to" {
+  params = [scope]
+  result = ["type=gha,mode=max,scope=${scope}"]
+}
+
 target "_common" {
-  context    = "."
-  platforms  = [PLATFORM]
-  cache-from = ["type=gha"]
-  cache-to   = ["type=gha,mode=max"]
+  context   = "."
+  platforms = [PLATFORM]
 }
 
 target "base" {
   inherits   = ["_common"]
+  cache-from = cache_from("base")
+  cache-to   = cache_to("base")
   dockerfile = "images/base.Dockerfile"
 }
 
@@ -34,6 +46,8 @@ target "base" {
 # publication. That ordering is the reason the pull request check exists.
 target "rust" {
   inherits   = ["_common"]
+  cache-from = cache_from("rust")
+  cache-to   = cache_to("rust")
   dockerfile = "images/rust.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -41,6 +55,8 @@ target "rust" {
 
 target "node" {
   inherits   = ["_common"]
+  cache-from = cache_from("node")
+  cache-to   = cache_to("node")
   dockerfile = "images/node.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -48,6 +64,8 @@ target "node" {
 
 target "python" {
   inherits   = ["_common"]
+  cache-from = cache_from("python")
+  cache-to   = cache_to("python")
   dockerfile = "images/python.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -55,6 +73,8 @@ target "python" {
 
 target "go" {
   inherits   = ["_common"]
+  cache-from = cache_from("go")
+  cache-to   = cache_to("go")
   dockerfile = "images/go.Dockerfile"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -62,6 +82,8 @@ target "go" {
 
 target "pwsh" {
   inherits   = ["_common"]
+  cache-from = cache_from("pwsh")
+  cache-to   = cache_to("pwsh")
   dockerfile = "Dockerfile.pwsh"
   contexts   = { base = "target:base" }
   args       = { BASE_IMAGE = "base" }
@@ -72,6 +94,8 @@ target "pwsh" {
 # above.
 target "root" {
   inherits   = ["_common"]
+  cache-from = cache_from("root")
+  cache-to   = cache_to("root")
   dockerfile = "Dockerfile"
 }
 

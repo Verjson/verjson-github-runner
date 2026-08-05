@@ -71,6 +71,14 @@ assert_count 2 'create-storage-record: false'
 
 # BuildKit attestations and immutable digest receipts are independent evidence and
 # must remain alongside GitHub artifact attestations.
+# BuildKit keys its gha cache index on the scope alone, so the six builds here shared one
+# index and overwrote each other's. One scope per image keeps each one stable, and these
+# are the scopes image-build-check.yml reads from its base branch.
+assert_count 1 'cache-from: type=gha,scope=base'
+assert_count 1 'cache-to: type=gha,mode=max,scope=base'
+assert_count 1 'cache-from: type=gha,scope=${{ matrix.kind }}'
+assert_count 1 'cache-to: type=gha,mode=max,scope=${{ matrix.kind }}'
+
 assert_count 2 'sbom: true'
 assert_count 2 'provenance: mode=max'
 assert_count 1 'name: Record immutable base image digest'
