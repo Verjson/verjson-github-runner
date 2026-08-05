@@ -4,4 +4,5 @@
 | --- | --- |
 | [0001 — Attested `ci` runner contract](0001-attested-ci-runner-contract/README.md) | Accepted |
 | [0002 — One-use PAT transport](0002-one-use-pat-transport/README.md) | Accepted pending rollout |
-| [0003 — Public repository CI routes to GitHub-hosted runners](0003-public-repository-ci-routes-to-hosted-runners/README.md) | Accepted |
+| [0003 — Public repository CI routes to GitHub-hosted runners](0003-public-repository-ci-routes-to-hosted-runners/README.md) | Superseded by 0004 |
+| [0004 — Every organization repository may use the shared self-hosted lane](0004-every-repository-may-use-the-shared-lane/README.md) | Accepted |

@@ -3,7 +3,7 @@
 - **Date:** 2026-08-05
 - **Issue:** Verjson/verjson-github-runner#107
 - **Category:** CI routing / runner-group admission boundary
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0004](../0004-every-repository-may-use-the-shared-lane/README.md)
 
 ## Context
 
