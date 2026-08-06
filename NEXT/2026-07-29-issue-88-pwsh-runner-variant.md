@@ -2,6 +2,7 @@
 date: 2026-07-29
 issue: 88
 title: PowerShell runner variant, as a separate tag
+summary: A new `Dockerfile.pwsh` layers PowerShell 7.6.4 onto the persistent-lane root image and ships as its own tag, so lanes that need `pwsh` get a runner able to execute PowerShell suites while the image everyone else builds stays lean. The version is pinned and checksum-verified per architecture against Microsoft's published hashes rather than installed from the apt repository, where it would float with build date. It deliberately stays outside `images/`, which builds the portable `ci` contract image that PowerShell is excluded from by agreement.
 ---
 
 `verjson-agents` ships two installers but only the bash suite runs in CI: no available
