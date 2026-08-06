@@ -2,6 +2,7 @@
 date: 2026-08-05
 issue: 119
 title: Cache and parallelise the pull request image build check
+summary: The pull request image build check now builds through a new `docker-bake.hcl`, fanning the base image, the four kind images and the pwsh variant out of a single concurrent bake solve and reading the `type=gha` cache that `publish-images.yml` already populates on `main`. Each image reads and writes its own cache scope, so the builds no longer overwrite one another's cache index, and thin variants export `mode=min` so re-exporting unchanged base layers cannot push the repository past its Actions cache quota. The weekly emulated arm64 leg deliberately builds cold, because a cache hit would skip the checksum verification it exists to exercise. What the check proves is unchanged - still amd64-only, build-only, pushing nothing and holding no registry credential.
 ---
 
 `image-build-check.yml` was the slowest thing this repository put in front of its own pull

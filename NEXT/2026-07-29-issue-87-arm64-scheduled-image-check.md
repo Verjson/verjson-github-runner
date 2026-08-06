@@ -2,6 +2,7 @@
 date: 2026-07-29
 issue: 87
 title: Catch arm64 image breakage on a schedule, not on main
+summary: The image build check now also runs on a weekly schedule and on demand, adding a `base-arm64` job that sets up QEMU and builds `images/base.Dockerfile` for `linux/arm64`, build-only. The per-arch `GH_SHA256_ARM64` and `NODE_SHA256_ARM64` pins had never been exercised before merge, so an upstream re-release or an arm64-only package gap first surfaced when `publish-images.yml` built the real multi-arch image on `main`. Emulated arm64 is far too slow to gate every pull request, so it is proven periodically instead, and the amd64 jobs are gated to `pull_request` so the cron runs only the arm64 leg.
 ---
 
 `image-build-check.yml` builds amd64 only, so the arch-specific half of

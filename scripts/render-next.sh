@@ -8,29 +8,85 @@
 # render locally is what CI validates.
 set -euo pipefail
 
-CONTRACT_REF="1486d44db0668d61354815c12bdbfc9d53fbeca4"
+CONTRACT_REF="f12dca7753739b292bf7795f43799b6ad1a54226"
+CONTRACT_SHA256="fe31ba44bee81a00f458129f7f0ac0a0712d28c88dc866ea08c54bb498d04d63"
 
+# --as-released is the only flag that passes through. It shows what a release
+# would write into CHANGELOG/<version>.md, which under ADR 0059 can never be
+# edited afterwards — so reading it before merge is the one review step the
+# contract asks of a fragment author, and it has to be reachable from the tool
+# they are given (#443). Everything else is still refused: this is a renderer,
+# not a general front end to a pinned engine.
+as_released=
 if [ "$#" -gt 0 ]; then
-  echo "render-next: unexpected argument '$1'" >&2
-  exit 2
+  if [ "$#" -eq 1 ] && [ "$1" = --as-released ]; then
+    as_released=--as-released
+  else
+    echo "render-next: unexpected argument '$1' (only --as-released is accepted)" >&2
+    exit 2
+  fi
 fi
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/verjson-changelog/$CONTRACT_REF"
-contract="$cache_dir/changelog.py"
 
-# Addressed by commit, so a cached copy cannot go stale: a new pin is a new path.
-if [ ! -f "$contract" ]; then
-  mkdir -p "$cache_dir"
-  url="https://raw.githubusercontent.com/Verjson/.github/$CONTRACT_REF/scripts/changelog.py"
-  # mktemp, not a fixed name: two concurrent renders share this cache directory.
-  tmp="$(mktemp "$cache_dir/.changelog.XXXXXX")"
-  if ! curl -fsSL "$url" -o "$tmp"; then
-    rm -f "$tmp"
-    echo "render-next: cannot fetch the changelog contract at $CONTRACT_REF" >&2
-    exit 1
+contract_fail() { echo "render-next: $1" >&2; exit 1; }
+
+contract_digest_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum <"$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 <"$1" | cut -d' ' -f1
+  else
+    return 1
   fi
-  mv "$tmp" "$contract"
+}
+
+# Identity, not existence. The cache path is keyed by commit, which reads as
+# content-addressed but is not: nothing stops another tool, a restored CI cache,
+# or an interrupted write from leaving different bytes there, and they would then
+# be executed as the contract on every run.
+contract_is_pinned() {
+  [ -f "$1" ] || return 1
+  local got
+  got="$(contract_digest_of "$1")" || return 1
+  [ "$got" = "$CONTRACT_SHA256" ]
+}
+
+# CHANGELOG_CONTRACT_PATH selects WHERE the engine comes from — a vendored copy,
+# an offline mirror, a warmed CI cache — and cannot select WHAT runs, because the
+# override is held to the digest pinned at $CONTRACT_REF. So it stays useful to
+# an air-gapped or cache-restoring consumer while the guarantee the renderer is
+# sold on ("the same code CI validates with") holds unconditionally (#304).
+if [ -n "${CHANGELOG_CONTRACT_PATH:-}" ]; then
+  contract="$CHANGELOG_CONTRACT_PATH"
+  [ -e "$contract" ] \
+    || contract_fail "CHANGELOG_CONTRACT_PATH is $contract, which does not exist"
+  contract_is_pinned "$contract" \
+    || contract_fail "CHANGELOG_CONTRACT_PATH ($contract) is not the contract pinned at $CONTRACT_REF"
+else
+  cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/verjson-changelog/$CONTRACT_REF"
+  contract="$cache_dir/changelog.py"
+  if ! contract_is_pinned "$contract"; then
+    mkdir -p "$cache_dir"
+    # mktemp, not a fixed name: concurrent runs share this cache directory.
+    tmp="$(mktemp "$cache_dir/.changelog.XXXXXX")"
+    if ! curl -fsSL \
+      "https://raw.githubusercontent.com/Verjson/.github/$CONTRACT_REF/scripts/changelog.py" \
+      -o "$tmp"; then
+      rm -f "$tmp"
+      contract_fail "cannot fetch the changelog contract at $CONTRACT_REF"
+    fi
+    # Verify before publishing into the cache, so a bad fetch is never persisted
+    # for the next run to trust.
+    if ! contract_is_pinned "$tmp"; then
+      rm -f "$tmp"
+      contract_fail "fetched contract does not match the digest pinned at $CONTRACT_REF"
+    fi
+    mv "$tmp" "$contract"
+  fi
 fi
 
+if [ -n "$as_released" ]; then
+  exec python3 "$contract" render-next --repo-root "$root" --as-released
+fi
 exec python3 "$contract" render-next --repo-root "$root"

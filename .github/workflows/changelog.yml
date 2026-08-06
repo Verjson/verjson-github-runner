@@ -8,6 +8,6 @@ permissions:
 
 jobs:
   changelog:
-    uses: Verjson/.github/.github/workflows/changelog-validate.yml@1486d44db0668d61354815c12bdbfc9d53fbeca4
+    uses: Verjson/.github/.github/workflows/changelog-validate.yml@f12dca7753739b292bf7795f43799b6ad1a54226
     with:
-      contract_ref: 1486d44db0668d61354815c12bdbfc9d53fbeca4
+      contract_ref: f12dca7753739b292bf7795f43799b6ad1a54226

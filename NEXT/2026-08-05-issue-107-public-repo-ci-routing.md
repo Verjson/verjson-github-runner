@@ -2,6 +2,7 @@
 date: 2026-08-05
 issue: 107
 title: Route this public repository's CI to GitHub-hosted runners
+summary: This public repository's CI now runs on GitHub-hosted `ubuntu-24.04` runners. Its `changelog / validate` and `privileged_merge` checks had been queueing indefinitely with no eligible runner, because org-level routing still sent them to a shared self-hosted lane whose runner group names 89 private repositories and refuses public ones - a selector nothing could satisfy, which blocked every pull request without failing anything. Repository-level runner variables now pin the target, the generated privileged-merge caller hardcodes it, and a `routing-guard` job asserts the variables so the org-level fallback cannot silently strand checks again.
 ---
 
 This repository's `changelog / validate` and `privileged_merge` checks had been queueing
