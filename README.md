@@ -34,6 +34,12 @@ Tequity. CI builds one shared artifact and pushes it to
 | `:pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
 | `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
 
+- Every image preloads the immutable changelog engines listed in
+  `images/changelog-tools.manifest` under `/opt/verjson/changelog-tools` and
+  exports that root as `VERJSON_CHANGELOG_TOOL_CACHE`. Image builds and `ci`
+  admission verify each commit-and-SHA-256 manifest entry. Add a new entry when
+  the organization advances its supported pin; retain older entries while
+  consumers still use them.
 - **Multi-arch:** published tags are `amd64` + `arm64`.
 - The **base image ships `gh`, Node.js 24/npm, and Docker CLI + buildx + compose plugins**, so
   `[self-hosted, docker]` jobs can run `docker build --secret` (BuildKit) and

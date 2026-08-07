@@ -24,6 +24,8 @@ jobs:
         run: bash tests/image_build_check_workflow_test.sh
       - name: Validate read-only cache inventory measurement
         run: bash tests/cache_inventory_test.sh
+      - name: Validate verified changelog tooling cache
+        run: bash tests/changelog_tool_cache_test.sh
       - name: Prove ephemeral jobs receive fresh writable layers
         run: bash tests/ephemeral_supervisor_integration.sh
       - name: Canonical changelog contract holds

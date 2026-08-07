@@ -2,11 +2,18 @@ FROM ubuntu:26.04
 
 ARG RUNNER_VERSION=2.335.1
 ENV DEBIAN_FRONTEND=noninteractive
+ENV VERJSON_CHANGELOG_TOOL_CACHE=/opt/verjson/changelog-tools
 
 # Base tools (git/curl/jq for token fetch; the runner needs libicu etc. via installdependencies.sh)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl jq git sudo tar gzip \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=0555 scripts/changelog-tool-cache.sh /usr/local/bin/changelog-tool-cache
+COPY --chmod=0444 images/changelog-tools.manifest /usr/local/share/verjson-changelog-tools.manifest
+RUN changelog-tool-cache install \
+    /usr/local/share/verjson-changelog-tools.manifest \
+    "${VERJSON_CHANGELOG_TOOL_CACHE}"
 
 # The runner refuses to run as root -> dedicated user
 RUN useradd -m -s /bin/bash runner \
