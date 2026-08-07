@@ -55,6 +55,11 @@ jobs:
       # publish-images.yml wires it, so a base change that breaks a variant fails here too.
       - name: Build the base image and every variant on it
         uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        env:
+          # Pull requests inherit main's cache. Exporting the same layers here creates a
+          # branch-scoped copy that survives the merge: one PR retained 4.25 GB beside
+          # main's 6.40 GB cache and pushed the repository over its 10 GB quota.
+          CACHE_WRITE: "off"
         with:
           files: docker-bake.hcl
           source: .
@@ -71,6 +76,10 @@ jobs:
       # so it can break on its own and is built in parallel.
       - name: Build root Dockerfile
         uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        env:
+          # Keep this build read-through only for the same branch-isolation reason as the
+          # grouped image build above.
+          CACHE_WRITE: "off"
         with:
           files: docker-bake.hcl
           source: .
@@ -96,7 +105,8 @@ jobs:
           # `curl | sha256sum -c` layer into a hit, so the checksum this job exists to
           # verify would never re-run. Writing it would also clobber the amd64 index that
           # publish-images.yml maintains in the same scope on refs/heads/main.
-          CACHE: "off"
+          CACHE_READ: "off"
+          CACHE_WRITE: "off"
         with:
           files: docker-bake.hcl
           source: .

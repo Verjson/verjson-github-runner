@@ -18,8 +18,12 @@ variable "PLATFORM" {
 # cache key cannot see — an upstream re-release under an unchanged version, or an arm64-only
 # package gap — where the Dockerfile is byte-identical and only the world changed. A cache
 # hit on the `curl | sha256sum -c` layer means the download and its checksum never re-run,
-# which is exactly the verification that job exists to perform. Set CACHE=off there.
-variable "CACHE" {
+# which is exactly the verification that job exists to perform. Set both controls off there.
+variable "CACHE_READ" {
+  default = "gha"
+}
+
+variable "CACHE_WRITE" {
   default = "gha"
 }
 
@@ -32,12 +36,12 @@ variable "CACHE" {
 # pushes to the same pull request.
 function "cache_from" {
   params = [scope]
-  result = CACHE == "gha" ? ["type=gha,scope=${scope}"] : []
+  result = CACHE_READ == "gha" ? ["type=gha,scope=${scope}"] : []
 }
 
 function "cache_to_full" {
   params = [scope]
-  result = CACHE == "gha" ? ["type=gha,mode=max,scope=${scope}"] : []
+  result = CACHE_WRITE == "gha" ? ["type=gha,mode=max,scope=${scope}"] : []
 }
 
 # A variant is a thin layer on a base that already has a cache scope of its own. Exporting
@@ -46,7 +50,7 @@ function "cache_to_full" {
 # what pushed this repository past GitHub's 10 GB cache quota into evicting its own entries.
 function "cache_to_thin" {
   params = [scope]
-  result = CACHE == "gha" ? ["type=gha,mode=min,scope=${scope}"] : []
+  result = CACHE_WRITE == "gha" ? ["type=gha,mode=min,scope=${scope}"] : []
 }
 
 target "_common" {

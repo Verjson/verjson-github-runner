@@ -37,6 +37,10 @@ bakefile_text="$(<"${bakefile}")"
   || fail "root image cache writes are not gha mode=max cache writes"
 [[ "${bakefile_text}" == *'["type=gha,mode=min,scope=${scope}"]'* ]] \
   || fail "variant cache writes are not gha mode=min cache writes"
+[[ "${bakefile_text}" == *'CACHE_READ == "gha"'* ]] \
+  || fail "cache reads cannot be controlled independently"
+[[ "${bakefile_text}" == *'CACHE_WRITE == "gha"'* ]] \
+  || fail "cache writes cannot be controlled independently"
 
 # One scope per image. BuildKit keys its gha cache index on the scope alone, so builds
 # sharing the default scope overwrite each other's index: seven builds against one scope
@@ -89,6 +93,19 @@ pr_bake_steps="$(awk '
 ' "${workflow}")"
 [[ "${pr_bake_steps}" == "          targets: pr-check" ]] \
   || fail "pull request leg must build every image in a single concurrent bake invocation, found: ${pr_bake_steps:-<none>}"
+
+# Pull requests inherit main's cache but must not export duplicate branch-scoped blobs.
+# One merged PR retained 4.25 GB while main's complete publication cache was 6.40 GB,
+# pushing the repository above its 10 GB limit and evicting the base it needed to reuse.
+pr_jobs="$(awk '
+  /^  base-and-kinds:/ { capture = 1 }
+  /^  base-and-pwsh-arm64:/ { exit }
+  capture { print }
+' "${workflow}")"
+[[ "$(grep -Fc 'CACHE_WRITE: "off"' <<<"${pr_jobs}")" == "2" ]] \
+  || fail "both pull request build jobs must disable branch-scoped cache exports"
+[[ "$(grep -Fc 'CACHE_READ: "off"' <<<"${pr_jobs}")" == "0" ]] \
+  || fail "pull request jobs must keep reading the default-branch cache"
 
 # Concurrency must not cost the ordering the check exists for: each variant still resolves
 # its base from the target built in this same run, never from a published tag.
@@ -148,8 +165,9 @@ arm64_job="$(awk '
 # under an unchanged version. Reading the cache turns the checksum layer into a hit, so the
 # verification never runs; writing it clobbers the amd64 index publish-images.yml maintains
 # in the same scope on refs/heads/main.
-[[ "${arm64_job}" == *'CACHE: "off"'* ]] \
-  || fail "arm64 leg must build cold, or its checksum verification never re-runs"
+[[ "${arm64_job}" == *'CACHE_READ: "off"'* ]] \
+  && [[ "${arm64_job}" == *'CACHE_WRITE: "off"'* ]] \
+  || fail "arm64 leg must read and write no cache, or its checksum verification can drift"
 
 # The pull request leg must stay amd64-only: widening the default would silently turn every
 # pull request into an emulated multi-arch build.
