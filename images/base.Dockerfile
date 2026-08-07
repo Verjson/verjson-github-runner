@@ -17,12 +17,19 @@ ARG NODE_SHA256_AMD64=55aa7153f9d88f28d765fcdad5ae6945b5c0f98a36881703817e4c450f
 ARG NODE_SHA256_ARM64=58c9520501f6ae2b52d5b210444e24b9d0c029a58c5011b797bc1fe7105886f6
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
+ENV VERJSON_CHANGELOG_TOOL_CACHE=/opt/verjson/changelog-tools
 
 # Install every standard utility exercised by the portable ci admission contract.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates coreutils curl diffutils findutils gawk git grep gzip jq \
       python3 python3-yaml sed shellcheck sudo tar unzip xz-utils zstd \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=0555 scripts/changelog-tool-cache.sh /usr/local/bin/changelog-tool-cache
+COPY --chmod=0444 images/changelog-tools.manifest /usr/local/share/verjson-changelog-tools.manifest
+RUN changelog-tool-cache install \
+    /usr/local/share/verjson-changelog-tools.manifest \
+    "${VERJSON_CHANGELOG_TOOL_CACHE}"
 
 # GitHub CLI release archives are pinned and verified against GitHub's published checksums.
 RUN case "${TARGETARCH}" in \

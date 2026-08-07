@@ -112,10 +112,11 @@ mock_passing_ci_tools() {
   cmp() { echo "cmp $*" >> "${command_log}"; }
   diff() { echo "diff $*" >> "${command_log}"; }
   zstd() { echo "zstd $*" >> "${command_log}"; }
+  changelog-tool-cache() { echo "changelog-tool-cache $*" >> "${command_log}"; }
 }
 
 expected_ci_admission_commands() {
-  printf '%s' $'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version\npython3 -c import yaml\nshellcheck --version\ncmp /dev/null /dev/null\ndiff /dev/null /dev/null\nzstd --version'
+  printf '%s' $'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version\npython3 -c import yaml\nshellcheck --version\ncmp /dev/null /dev/null\ndiff /dev/null /dev/null\nzstd --version\nchangelog-tool-cache verify /usr/local/share/verjson-changelog-tools.manifest /opt/verjson/changelog-tools'
 }
 
 # Mock api_base for tests
@@ -525,7 +526,7 @@ echo "Test 20: standalone ci dispatches directly to admission"
 
   mock_passing_ci_tools
   export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip unzip
-  export -f python3 shellcheck cmp diff zstd
+  export -f python3 shellcheck cmp diff zstd changelog-tool-cache
 
   cat << EOF > "${standalone_dir}/config.sh"
 #!/usr/bin/env bash
@@ -980,6 +981,25 @@ done
 
   assert_eq "1" "${status}" "Rejects ci admission without PyYAML"
   assert_contains "PyYAML is unavailable or unhealthy" "${output}" "Identifies the missing Python module"
+)
+
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_bad_changelog_cache.log"
+  mock_passing_ci_tools
+  changelog-tool-cache() {
+    echo "changelog-tool-cache $*" >> "${command_log}"
+    return 1
+  }
+
+  set +e
+  output="$(attest_ci_runner 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Rejects ci admission when the changelog cache mismatches"
+  assert_contains "verified changelog tool cache is unavailable or unhealthy" \
+    "${output}" "Identifies the invalid changelog cache"
 )
 
 # -----------------------------------------------------------------------------

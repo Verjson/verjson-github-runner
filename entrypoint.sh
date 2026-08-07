@@ -335,6 +335,12 @@ run_admission_check() {
   fi
 }
 
+verify_changelog_tool_cache() {
+  changelog-tool-cache verify \
+    /usr/local/share/verjson-changelog-tools.manifest \
+    "${VERJSON_CHANGELOG_TOOL_CACHE:-/opt/verjson/changelog-tools}"
+}
+
 version_is_at_least() {
   local actual="$1" minimum="$2"
   local actual_major actual_minor minimum_major minimum_minor
@@ -519,6 +525,8 @@ attest_ci_runner() {
   run_admission_check "cmp" cmp /dev/null /dev/null || return 1
   run_admission_check "diff" diff /dev/null /dev/null || return 1
   run_admission_check "zstd" zstd --version || return 1
+  run_admission_check "verified changelog tool cache" \
+    verify_changelog_tool_cache || return 1
   echo "CI runner admission passed."
 }
 

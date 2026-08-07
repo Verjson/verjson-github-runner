@@ -1,0 +1,3 @@
+# Immutable Verjson/.github commit and SHA-256 of scripts/changelog.py.
+# Add one line for every supported consumer pin before rebuilding the image.
+bb5c34c708065e14c3fd663a4d87763f81d3aa93 26ceba186acd61562c2d4c0cf1d1a64628ee73b5713fcadfbadf15ae10344c04
