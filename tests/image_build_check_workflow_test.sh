@@ -107,6 +107,15 @@ pr_jobs="$(awk '
 [[ "$(grep -Fc 'CACHE_READ: "off"' <<<"${pr_jobs}")" == "0" ]] \
   || fail "pull request jobs must keep reading the default-branch cache"
 
+# Operators need a repeatable warm-cache measurement without manufacturing a pull request.
+# Arm64 remains the safe default because that is the historical on-demand behavior.
+[[ "${pr_jobs}" == *"if: github.event_name == 'pull_request' || inputs.build == 'amd64'"* ]] \
+  || fail "amd64 jobs must support explicit on-demand cache measurements"
+[[ "$(grep -Fc "if: github.event_name == 'pull_request' || inputs.build == 'amd64'" "${workflow}")" == "2" ]] \
+  || fail "both amd64 jobs must use the same pull-request/on-demand condition"
+[[ "$(grep -A1 -F '        default: arm64' "${workflow}")" == $'        default: arm64\n        type: choice' ]] \
+  || fail "workflow dispatch must preserve arm64 as its default"
+
 # Concurrency must not cost the ordering the check exists for: each variant still resolves
 # its base from the target built in this same run, never from a published tag.
 for target in rust node python go pwsh; do
@@ -168,6 +177,8 @@ arm64_job="$(awk '
 [[ "${arm64_job}" == *'CACHE_READ: "off"'* ]] \
   && [[ "${arm64_job}" == *'CACHE_WRITE: "off"'* ]] \
   || fail "arm64 leg must read and write no cache, or its checksum verification can drift"
+[[ "${arm64_job}" == *"if: github.event_name == 'schedule' || inputs.build == 'arm64'"* ]] \
+  || fail "arm64 must run only on schedule or an explicit/default arm64 dispatch"
 
 # The pull request leg must stay amd64-only: widening the default would silently turn every
 # pull request into an emulated multi-arch build.
