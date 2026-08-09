@@ -1,0 +1,22 @@
+# GENERATED FILE — do not edit by hand.
+# Regenerate with:
+#   scripts/gen-privileged-merge-caller.sh be4da6b739d36b1264f43b8509b995b2edaecad9 --retry '["changelog","image build check","test"]' > .github/workflows/ai-promotion-retry.yml
+name: AI terminal promotion retry
+
+on:
+  workflow_run:
+    workflows: ["changelog","image build check","test"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  retry:
+    uses: Verjson/.github/.github/workflows/ai-promotion-retry.yml@be4da6b739d36b1264f43b8509b995b2edaecad9
+    secrets:
+      ACTIONS_VARIABLES_TOKEN: ${{ secrets.ACTIONS_VARIABLES_TOKEN }}
+      ORG_ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
