@@ -1,6 +1,6 @@
 ---
 date: 2026-08-15
-issue: 20260815T140000Z
+id: 20260815T140000Z
 title: Ignore Serena agent tooling residue
 ---
 
