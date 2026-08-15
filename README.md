@@ -29,7 +29,7 @@ Tequity. CI builds one shared artifact and pushes it to
 
 | Tag | Contents |
 |-----|----------|
-| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, organization CI tools, non-root) |
+| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, native addon toolchain, organization CI tools, non-root) |
 | `:rust` `:node` `:python` `:go` | base + that language toolchain |
 | `:pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
 | `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
@@ -237,7 +237,7 @@ target it via `runs-on`:
 | **Node** | Node.js LTS + npm, pnpm, yarn | `[self-hosted, node]` |
 | **Python** | Python 3 + pip/venv + uv | `[self-hosted, python]` |
 | **Go** | official Go toolchain | `[self-hosted, go]` |
-| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, organization CI tools | `[self-hosted]` |
+| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, native addon toolchain, organization CI tools | `[self-hosted]` |
 | **PowerShell** | Base + pinned PowerShell | `[self-hosted, pwsh]` |
 
 Language kinds live in `images/<kind>.Dockerfile`; the published PowerShell variant uses

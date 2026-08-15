@@ -112,11 +112,26 @@ mock_passing_ci_tools() {
   cmp() { echo "cmp $*" >> "${command_log}"; }
   diff() { echo "diff $*" >> "${command_log}"; }
   zstd() { echo "zstd $*" >> "${command_log}"; }
+  cc() { echo "cc $*" >> "${command_log}"; }
+  make() { echo "make $*" >> "${command_log}"; }
+  pkg-config() { echo "pkg-config $*" >> "${command_log}"; }
   changelog-tool-cache() { echo "changelog-tool-cache $*" >> "${command_log}"; }
+  # Deterministic regardless of whether the machine running the suite has a compiler.
+  PATH="$(cxx_stub_dir):${PATH}"
+}
+
+# `c++`/`g++` are not shadowable by a shell function, so the C++ admission check resolves
+# them on PATH. These helpers move PATH rather than mocking a command.
+cxx_stub_dir() {
+  local dir="${TMP_DIR}/cxx_stub"
+  mkdir -p "${dir}"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${dir}/c++"
+  chmod +x "${dir}/c++"
+  echo "${dir}"
 }
 
 expected_ci_admission_commands() {
-  printf '%s' $'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version\npython3 -c import yaml\nshellcheck --version\ncmp /dev/null /dev/null\ndiff /dev/null /dev/null\nzstd --version\nchangelog-tool-cache verify /usr/local/share/verjson-changelog-tools.manifest /opt/verjson/changelog-tools'
+  printf '%s' $'gh --version\ndocker version\ndocker compose version\ndocker buildx version\nnode --version\nnpm --version\njq --version\ngit --version\nbash --version\ncurl --version\ngrep --version\nsed --version\nawk --version\nfind --version\nbase64 --version\ntar --version\ngzip --version\nunzip -v\npython3 --version\npython3 -c import yaml\nshellcheck --version\ncmp /dev/null /dev/null\ndiff /dev/null /dev/null\nzstd --version\ncc --version\nmake --version\npkg-config --version\nchangelog-tool-cache verify /usr/local/share/verjson-changelog-tools.manifest /opt/verjson/changelog-tools'
 }
 
 # Mock api_base for tests
@@ -526,7 +541,8 @@ echo "Test 20: standalone ci dispatches directly to admission"
 
   mock_passing_ci_tools
   export -f gh docker node npm jq git bash curl grep sed awk find base64 tar gzip unzip
-  export -f python3 shellcheck cmp diff zstd changelog-tool-cache
+  export -f python3 shellcheck cmp diff zstd cc make pkg-config changelog-tool-cache
+  export PATH
 
   cat << EOF > "${standalone_dir}/config.sh"
 #!/usr/bin/env bash
@@ -944,7 +960,7 @@ echo "Test 32: material runtime version floors"
 # Test 33: each newly fixed capability fails closed when missing
 # -----------------------------------------------------------------------------
 echo "Test 33: newly fixed capabilities fail closed when missing"
-for capability in shellcheck cmp diff zstd; do
+for capability in shellcheck cmp diff zstd cc make pkg-config; do
   (
     source "${REPO_ROOT}/entrypoint.sh"
     command_log="${TMP_DIR}/admission_no_${capability}.log"
@@ -960,6 +976,49 @@ for capability in shellcheck cmp diff zstd; do
     assert_contains "unavailable or unhealthy" "${output}" "Reports missing ${capability}"
   )
 done
+
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_no_cxx.log"
+  mock_passing_ci_tools
+  # An empty PATH means neither c++ nor g++ resolves. Restored immediately afterwards,
+  # because the assertion helpers themselves shell out to coreutils.
+  empty_path_dir="${TMP_DIR}/no_cxx_path"
+  mkdir -p "${empty_path_dir}"
+  saved_path="${PATH}"
+  PATH="${empty_path_dir}"
+
+  set +e
+  output="$(attest_ci_runner 2>&1)"
+  status=$?
+  set -e
+  PATH="${saved_path}"
+
+  assert_eq "1" "${status}" "Rejects ci admission without a C++ compiler"
+  assert_contains "C++ compiler (c++ or g++) is unavailable" "${output}" \
+    "Names both accepted C++ compiler binaries"
+)
+
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  command_log="${TMP_DIR}/admission_gxx_only.log"
+  mock_passing_ci_tools
+  # g++ alone satisfies node-gyp, so it must satisfy admission too.
+  gxx_only_dir="${TMP_DIR}/gxx_only_path"
+  mkdir -p "${gxx_only_dir}"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${gxx_only_dir}/g++"
+  chmod +x "${gxx_only_dir}/g++"
+  saved_path="${PATH}"
+  PATH="${gxx_only_dir}"
+
+  set +e
+  run_cxx_admission_check > /dev/null 2>&1
+  status=$?
+  set -e
+  PATH="${saved_path}"
+
+  assert_eq "0" "${status}" "Accepts a toolchain that only provides g++"
+)
 
 (
   source "${REPO_ROOT}/entrypoint.sh"
