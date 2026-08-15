@@ -125,7 +125,7 @@ mock_passing_ci_tools() {
 cxx_stub_dir() {
   local dir="${TMP_DIR}/cxx_stub"
   mkdir -p "${dir}"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "${dir}/c++"
+  printf '#!/bin/sh\nexit 0\n' > "${dir}/c++"
   chmod +x "${dir}/c++"
   echo "${dir}"
 }
@@ -1006,7 +1006,7 @@ done
   # g++ alone satisfies node-gyp, so it must satisfy admission too.
   gxx_only_dir="${TMP_DIR}/gxx_only_path"
   mkdir -p "${gxx_only_dir}"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "${gxx_only_dir}/g++"
+  printf '#!/bin/sh\nexit 0\n' > "${gxx_only_dir}/g++"
   chmod +x "${gxx_only_dir}/g++"
   saved_path="${PATH}"
   PATH="${gxx_only_dir}"
