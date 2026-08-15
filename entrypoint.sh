@@ -335,6 +335,24 @@ run_admission_check() {
   fi
 }
 
+# `c++` and `g++` cannot be shadowed by a shell function, so this check resolves the
+# binary on PATH instead of invoking it through run_admission_check. Either name
+# satisfies node-gyp, which is the consumer that matters.
+run_cxx_admission_check() {
+  local compiler
+
+  for compiler in c++ g++; do
+    # Executed, not merely resolved: a compiler present but unable to run — a broken ELF,
+    # a missing shared library — would otherwise pass admission and fail the job instead.
+    if "${compiler}" --version > /dev/null 2>&1; then
+      return 0
+    fi
+  done
+
+  echo "CI runner admission failed: C++ compiler (c++ or g++) is unavailable or unhealthy." >&2
+  return 1
+}
+
 verify_changelog_tool_cache() {
   changelog-tool-cache verify \
     /usr/local/share/verjson-changelog-tools.manifest \
@@ -525,6 +543,13 @@ attest_ci_runner() {
   run_admission_check "cmp" cmp /dev/null /dev/null || return 1
   run_admission_check "diff" diff /dev/null /dev/null || return 1
   run_admission_check "zstd" zstd --version || return 1
+  # Native addon toolchain. A prebuilt binary is an optimisation, not a guarantee: when
+  # prebuild-install misses, `node-gyp rebuild` is the only path an install script has,
+  # and a runner without a compiler turns that into a failed job rather than a slow one.
+  run_admission_check "C compiler" cc --version || return 1
+  run_cxx_admission_check || return 1
+  run_admission_check "make" make --version || return 1
+  run_admission_check "pkg-config" pkg-config --version || return 1
   run_admission_check "verified changelog tool cache" \
     verify_changelog_tool_cache || return 1
   echo "CI runner admission passed."

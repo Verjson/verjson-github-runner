@@ -29,7 +29,7 @@ Tequity. CI builds one shared artifact and pushes it to
 
 | Tag | Contents |
 |-----|----------|
-| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, organization CI tools, non-root) |
+| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, native addon toolchain, organization CI tools, non-root) |
 | `:rust` `:node` `:python` `:go` | base + that language toolchain |
 | `:pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
 | `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
@@ -80,7 +80,8 @@ capability contract shared by Verjson and Tequity. Before minting a registration
 or running `config.sh`, the container
 exercises `gh`, Docker daemon access, Compose, Buildx, Node.js >=24.10, npm, jq >=1.6,
 git, Bash >=4.3, curl, grep, sed, awk, find, base64, tar, gzip, unzip, Python >=3.10,
-PyYAML, ShellCheck, `cmp`, `diff`, and zstd. If any check fails,
+PyYAML, ShellCheck, `cmp`, `diff`, zstd, a C compiler, a C++ compiler, `make`, and
+`pkg-config`. If any check fails,
 startup stops and the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt
 into this contract. PowerShell is not part of the portable Linux contract: the exact
 case-insensitive `pwsh` label independently requires `pwsh --version` before registration.
@@ -237,7 +238,7 @@ target it via `runs-on`:
 | **Node** | Node.js LTS + npm, pnpm, yarn | `[self-hosted, node]` |
 | **Python** | Python 3 + pip/venv + uv | `[self-hosted, python]` |
 | **Go** | official Go toolchain | `[self-hosted, go]` |
-| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, organization CI tools | `[self-hosted]` |
+| **Base** | `gh`, Docker CLI/Compose/Buildx, Node.js 24/npm, native addon toolchain, organization CI tools | `[self-hosted]` |
 | **PowerShell** | Base + pinned PowerShell | `[self-hosted, pwsh]` |
 
 Language kinds live in `images/<kind>.Dockerfile`; the published PowerShell variant uses

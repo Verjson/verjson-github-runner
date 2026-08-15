@@ -20,9 +20,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV VERJSON_CHANGELOG_TOOL_CACHE=/opt/verjson/changelog-tools
 
 # Install every standard utility exercised by the portable ci admission contract.
+#
+# build-essential and pkg-config belong to that contract rather than to a language
+# variant: an npm package whose install script falls back from a prebuilt binary to
+# `node-gyp rebuild` cannot degrade to a slow source build without them, it fails
+# outright. They cost 411 MB, measured — which is why CMake is deliberately NOT here.
+# Nothing this fleet builds today needs a cmake-js source build, and cmake-js downloads
+# its own CMake when it does; add the package (a further 96 MB) when a real consumer
+# proves that download unreliable, not before.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash ca-certificates coreutils curl diffutils findutils gawk git grep gzip jq \
-      python3 python3-yaml sed shellcheck sudo tar unzip xz-utils zstd \
+      bash build-essential ca-certificates coreutils curl diffutils findutils \
+      gawk git grep gzip jq pkg-config python3 python3-yaml sed shellcheck sudo tar \
+      unzip xz-utils zstd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=0555 scripts/changelog-tool-cache.sh /usr/local/bin/changelog-tool-cache

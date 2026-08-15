@@ -98,7 +98,11 @@ jobs:
   base-and-pwsh-arm64:
     if: github.event_name == 'schedule' || inputs.build == 'arm64'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Raised from 90 with build-essential: hundreds of dpkg maintainer scripts now run under
+    # QEMU on a leg that is deliberately cold and cache-disabled. It is weekly, so a timeout
+    # here would surface as a mysterious scheduled failure long after the change that caused
+    # it. Measure a real arm64 run before trimming this back.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Same QEMU pin as publish-images.yml, which is where the arm64 build otherwise runs.
