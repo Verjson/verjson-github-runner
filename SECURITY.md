@@ -65,8 +65,8 @@ Self-hosted runners execute user-supplied code (including dependency lifecycle s
   case-insensitively to GitHub's label semantics, `entrypoint.sh`
   exercises GitHub CLI, Docker daemon access, Compose, Buildx, Node.js >=24.10, npm,
   jq >=1.6, git, Bash >=4.3, curl, grep, sed, awk, find, base64, tar, gzip, unzip,
-  Python >=3.10, PyYAML, ShellCheck, `cmp`, `diff`, and zstd before resolving any
-  registration credential.
+  Python >=3.10, PyYAML, ShellCheck, `cmp`, `diff`, zstd, a C compiler, a C++
+  compiler, `make`, and `pkg-config` before resolving any registration credential.
 * **Effect**: A container cannot advertise `ci` and accept a job with a partial toolchain.
   Failure prevents both registration-token minting and `config.sh` registration; there is
   no caller-controlled bypass. Before every token mint, an ephemeral supervisor launches

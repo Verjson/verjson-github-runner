@@ -342,7 +342,9 @@ run_cxx_admission_check() {
   local compiler
 
   for compiler in c++ g++; do
-    if command -v "${compiler}" > /dev/null 2>&1; then
+    # Executed, not merely resolved: a compiler present but unable to run — a broken ELF,
+    # a missing shared library — would otherwise pass admission and fail the job instead.
+    if "${compiler}" --version > /dev/null 2>&1; then
       return 0
     fi
   done

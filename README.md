@@ -80,7 +80,8 @@ capability contract shared by Verjson and Tequity. Before minting a registration
 or running `config.sh`, the container
 exercises `gh`, Docker daemon access, Compose, Buildx, Node.js >=24.10, npm, jq >=1.6,
 git, Bash >=4.3, curl, grep, sed, awk, find, base64, tar, gzip, unzip, Python >=3.10,
-PyYAML, ShellCheck, `cmp`, `diff`, and zstd. If any check fails,
+PyYAML, ShellCheck, `cmp`, `diff`, zstd, a C compiler, a C++ compiler, `make`, and
+`pkg-config`. If any check fails,
 startup stops and the runner never becomes schedulable. Labels such as `circleci` or `ci-extra` do not opt
 into this contract. PowerShell is not part of the portable Linux contract: the exact
 case-insensitive `pwsh` label independently requires `pwsh --version` before registration.
