@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   packages: read
 
@@ -19,20 +20,40 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - name: Build fail-closed retention plan
+      - name: Snapshot GitHub evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/ghcr_retention.py plan --output ghcr-retention-plan.json
+          python3 scripts/ghcr_retention.py inventory --output ghcr-package-inventory.json
+          python3 scripts/ghcr_retention.py prior-evidence \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF" \
+            --current-run-id "$GITHUB_RUN_ID" \
+            --expected-output ghcr-expected-prior.json \
+            --evidence-output ghcr-prior-evidence.json
+      - name: Build fail-closed retention plan
+        run: |
+          python3 scripts/ghcr_retention.py plan \
+            --inventory ghcr-package-inventory.json \
+            --prior-evidence ghcr-prior-evidence.json \
+            --expected-prior ghcr-expected-prior.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --head-sha "$GITHUB_SHA" \
+            --output ghcr-retention-plan.json
           {
             printf '## GHCR retention dry run\n\n'
-            jq -r '"- Plan: `" + .plan_sha256 + "`\n- Versions: " + (.counts.versions|tostring) + "\n- Referenced untagged dependencies: " + (.counts.reachable_untagged_dependencies|tostring) + "\n- Unreachable untagged versions: " + (.counts.unreachable_untagged|tostring) + "\n- Provisional policy candidates: " + (.counts.candidates|tostring) + "\n- Pruning authorized: " + (.pruning_authorized|tostring)' ghcr-retention-plan.json
+            jq -r '"- Plan: `" + .plan_sha256 + "`\n- Observation chain: " + .observation_chain.status + "\n- Versions: " + (.counts.versions|tostring) + "\n- Referenced untagged dependencies: " + (.counts.reachable_untagged_dependencies|tostring) + "\n- Unreachable untagged versions: " + (.counts.unreachable_untagged|tostring) + "\n- Provisional policy candidates: " + (.counts.candidates|tostring) + "\n- Pruning authorized: " + (.pruning_authorized|tostring)' ghcr-retention-plan.json
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload auditable dry-run plan
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ghcr-retention-plan-${{ github.run_id }}
+          name: ghcr-retention-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: ghcr-retention-plan.json
           if-no-files-found: error
           retention-days: 90
