@@ -290,7 +290,9 @@ validated runner name (for example, `_work/ci-runner-01`) and emits a
 `WORK_ROOT_ADMISSION` receipt. This makes the deployment invariant explicit:
 concurrently active runner processes never share a checkout or Git index. An
 exclusive filesystem lock also rejects overlapping processes with the same
-runner name before either can register.
+runner name before either can register. Locks live outside workflow data under
+the runner's mode-0700 state directory, and startup rejects symbolic-link work
+roots instead of following them.
 
 All of these are collected from you at the prompts, so nothing is hardcoded. The
 **runner group** defaults to `Default` (works out of the box); only change it if
@@ -408,7 +410,12 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_WORKDIR` — optional parent directory for job workspaces (defaults to
     `_work`). The entrypoint appends `RUNNER_NAME`; runner names must contain only
     letters, numbers, `.`, `_`, or `-` so each active runner has a distinct root.
+    The parent is one relative path segment with the same character policy, so
+    admission receipts cannot contain control characters or ambiguous fields.
     The parent filesystem must support `flock` for duplicate-name admission.
+  - `RUNNER_STATE_DIR` — optional trusted lock-state directory (defaults to
+    `$RUNNER_DIR/.runner-state`). It must be owned by the runner user, mode 0700,
+    and not a symbolic link.
   - `RUNNER_EPHEMERAL` — explicit boolean (`true/false`, `1/0`, `yes/no`, or
     `on/off`). The `gha` manager uses it with supervisor mode so every job gets a
     new `--rm` child container. A direct runner refuses ephemeral mode unless an

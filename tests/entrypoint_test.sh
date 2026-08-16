@@ -87,22 +87,17 @@ assert_file_absent() {
 echo "Test: runner work roots are unique and isolate overlapping checkouts"
 (
   source "${REPO_ROOT}/entrypoint.sh"
-  RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+  work_sandbox="${TMP_DIR}/work-sandbox"
+  mkdir -p "${work_sandbox}"
+  cd "${work_sandbox}"
+  RUNNER_STATE_DIR="${TMP_DIR}/runner-state"
+  RUNNER_WORKDIR="shared-parent"
   RUNNER_NAME="gha-general-10"
   resolve_runner_workdir >/dev/null
-  first_root="${RUNNER_WORKDIR}"
-
-  RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
-  RUNNER_NAME="gha-general-10"
-  set +e
-  duplicate_output="$(resolve_runner_workdir 2>&1)"
-  duplicate_status=$?
-  set -e
-  assert_eq "1" "${duplicate_status}" "Rejects a second active process for the same work root"
-  assert_contains "already active" "${duplicate_output}" "Explains the duplicate work-root rejection"
+  first_root="${work_sandbox}/${RUNNER_WORKDIR}"
 
   for unsafe_name in "GitHub Actions 2" "../escape"; do
-    RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+    RUNNER_WORKDIR="shared-parent"
     RUNNER_NAME="${unsafe_name}"
     set +e
     unsafe_output="$(resolve_runner_workdir 2>&1)"
@@ -112,22 +107,24 @@ echo "Test: runner work roots are unique and isolate overlapping checkouts"
     assert_contains "only letters" "${unsafe_output}" "Explains unsafe runner-name rejection"
   done
 
-  RUNNER_WORKDIR=$'unsafe\nreceipt'
-  RUNNER_NAME="gha-general-12"
-  set +e
-  unsafe_output="$(resolve_runner_workdir 2>&1)"
-  unsafe_status=$?
-  set -e
-  assert_eq "1" "${unsafe_status}" "Rejects a newline-bearing work parent"
-  assert_contains "single-line" "${unsafe_output}" "Explains work-parent log-injection rejection"
+  for unsafe_parent in $'unsafe\nreceipt' $'unsafe\tfield' $'unsafe\033escape' 'unsafe/path' 'unsafe=value'; do
+    RUNNER_WORKDIR="${unsafe_parent}"
+    RUNNER_NAME="gha-general-12"
+    set +e
+    unsafe_output="$(resolve_runner_workdir 2>&1)"
+    unsafe_status=$?
+    set -e
+    assert_eq "1" "${unsafe_status}" "Rejects an unsafe work-parent value"
+    assert_contains "safe relative path segment" "${unsafe_output}" "Explains strict work-parent rejection"
+  done
 
-  RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+  RUNNER_WORKDIR="shared-parent"
   RUNNER_NAME="gha-general-11"
   resolve_runner_workdir >/dev/null
-  second_root="${RUNNER_WORKDIR}"
+  second_root="${work_sandbox}/${RUNNER_WORKDIR}"
 
-  assert_eq "${TMP_DIR}/shared-parent/gha-general-10" "${first_root}" "Derives the first runner's work root from its name"
-  assert_eq "${TMP_DIR}/shared-parent/gha-general-11" "${second_root}" "Derives a distinct work root for the second runner"
+  assert_eq "${work_sandbox}/shared-parent/gha-general-10" "${first_root}" "Derives the first runner's work root from its name"
+  assert_eq "${work_sandbox}/shared-parent/gha-general-11" "${second_root}" "Derives a distinct work root for the second runner"
 
   git init -q --bare "${TMP_DIR}/origin.git"
   git -C "${TMP_DIR}/origin.git" symbolic-ref HEAD refs/heads/main
@@ -154,6 +151,74 @@ echo "Test: runner work roots are unique and isolate overlapping checkouts"
   printf 'runner-one\n' > "${first_root}/repo/ref.txt"
   assert_eq "other" "$(< "${second_root}/repo/ref.txt")" "An overlapping checkout cannot modify the other runner's worktree"
   assert_eq "" "$(git -C "${second_root}/repo" status --porcelain)" "An overlapping checkout cannot modify the other runner's index"
+)
+
+echo "Test: work-root locks contend across processes and release on exit"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  lock_sandbox="${TMP_DIR}/lock-sandbox"
+  mkdir -p "${lock_sandbox}"
+  holder_ready="${TMP_DIR}/holder-ready"
+  holder_release="${TMP_DIR}/holder-release"
+  (
+    cd "${lock_sandbox}"
+    RUNNER_STATE_DIR="${TMP_DIR}/lock-state"
+    RUNNER_WORKDIR="work"
+    RUNNER_NAME="contended"
+    resolve_runner_workdir >/dev/null
+    touch "${holder_ready}"
+    while [[ ! -e "${holder_release}" ]]; do sleep 0.05; done
+  ) &
+  holder_pid=$!
+  for _ in {1..100}; do [[ -e "${holder_ready}" ]] && break; sleep 0.05; done
+  assert_file_exists "${holder_ready}" "First process acquires the work-root lock"
+
+  cd "${lock_sandbox}"
+  RUNNER_STATE_DIR="${TMP_DIR}/lock-state"
+  RUNNER_WORKDIR="work"
+  RUNNER_NAME="contended"
+  set +e
+  contention_output="$(resolve_runner_workdir 2>&1)"
+  contention_status=$?
+  set -e
+  assert_eq "1" "${contention_status}" "Second process cannot acquire an active work-root lock"
+  assert_contains "already active" "${contention_output}" "Explains cross-process lock contention"
+
+  touch "${holder_release}"
+  wait "${holder_pid}"
+  resolve_runner_workdir >/dev/null
+  assert_eq "work/contended" "${RUNNER_WORKDIR}" "Lock becomes available after the holder exits"
+)
+
+echo "Test: work-root admission rejects attacker-planted symlinks"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  symlink_sandbox="${TMP_DIR}/symlink-sandbox"
+  mkdir -p "${symlink_sandbox}/state" "${symlink_sandbox}/target" "${symlink_sandbox}/work"
+  chmod 700 "${symlink_sandbox}/state"
+  cd "${symlink_sandbox}"
+  RUNNER_STATE_DIR="${symlink_sandbox}/state"
+  RUNNER_WORKDIR="work"
+  RUNNER_NAME="lock-victim"
+  ln -s "${symlink_sandbox}/target/lock" "${RUNNER_STATE_DIR}/${RUNNER_NAME}.work-root.lock"
+  set +e
+  symlink_output="$(resolve_runner_workdir 2>&1)"
+  symlink_status=$?
+  set -e
+  assert_eq "1" "${symlink_status}" "Rejects an attacker-planted lock symlink"
+  assert_contains "lock must not be a symbolic link" "${symlink_output}" "Explains lock symlink rejection"
+  assert_file_absent "${symlink_sandbox}/target/lock" "Does not follow the malicious lock symlink"
+
+  RUNNER_STATE_DIR="${symlink_sandbox}/state-two"
+  RUNNER_NAME="root-victim"
+  mkdir -m 700 "${RUNNER_STATE_DIR}"
+  ln -s "${symlink_sandbox}/target" "${symlink_sandbox}/work/${RUNNER_NAME}"
+  set +e
+  symlink_output="$(resolve_runner_workdir 2>&1)"
+  symlink_status=$?
+  set -e
+  assert_eq "1" "${symlink_status}" "Rejects an attacker-planted work-root symlink"
+  assert_contains "must be a real directory" "${symlink_output}" "Explains work-root symlink rejection"
 )
 
 mock_passing_ci_tools() {

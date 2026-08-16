@@ -151,25 +151,65 @@ initialize_runner_labels() {
 
 resolve_runner_workdir() {
   local work_parent="${RUNNER_WORKDIR:-_work}"
+  local runner_dir="${RUNNER_DIR:-/home/runner/actions-runner}"
+  local state_dir="${RUNNER_STATE_DIR:-${runner_dir}/.runner-state}"
+  local lock_path work_root state_owner state_mode
   [[ "${RUNNER_NAME}" =~ ^[[:alnum:]_.-]+$ && "${RUNNER_NAME}" != "." && "${RUNNER_NAME}" != ".." ]] || {
     echo "RUNNER_NAME must contain only letters, numbers, '.', '_', or '-' so it can identify an isolated work root." >&2
     return 1
   }
-  [[ -n "${work_parent}" && "${work_parent}" != *$'\n'* && "${work_parent}" != *$'\r'* ]] || {
-    echo "RUNNER_WORKDIR must name a non-empty, single-line parent directory." >&2
+  [[ "${work_parent}" =~ ^[[:alnum:]_.-]+$ && "${work_parent}" != "." && "${work_parent}" != ".." ]] || {
+    echo "RUNNER_WORKDIR must be one safe relative path segment containing only letters, numbers, '.', '_', or '-'." >&2
     return 1
   }
   command -v flock >/dev/null 2>&1 || {
     echo "Runner work-root admission requires flock." >&2
     return 1
   }
-  mkdir -p "${work_parent}"
-  exec {RUNNER_WORKDIR_LOCK_FD}>"${work_parent%/}/.${RUNNER_NAME}.work-root.lock"
+  if [[ -L "${state_dir}" ]]; then
+    echo "RUNNER_STATE_DIR must not be a symbolic link." >&2
+    return 1
+  fi
+  mkdir -p -m 700 "${state_dir}"
+  state_owner="$(stat -c '%u' "${state_dir}")"
+  state_mode="$(stat -c '%a' "${state_dir}")"
+  [[ "${state_owner}" == "$(id -u)" && "${state_mode}" == 700 ]] || {
+    echo "RUNNER_STATE_DIR must be owned by the runner user with mode 0700." >&2
+    return 1
+  }
+  lock_path="${state_dir}/${RUNNER_NAME}.work-root.lock"
+  [[ ! -L "${lock_path}" ]] || {
+    echo "Runner work-root lock must not be a symbolic link for RUNNER_NAME=${RUNNER_NAME}." >&2
+    return 1
+  }
+  : >> "${lock_path}"
+  [[ -f "${lock_path}" && ! -L "${lock_path}" ]] || {
+    echo "Runner work-root lock must be a regular file for RUNNER_NAME=${RUNNER_NAME}." >&2
+    return 1
+  }
+  exec {RUNNER_WORKDIR_LOCK_FD}>"${lock_path}"
   flock -n "${RUNNER_WORKDIR_LOCK_FD}" || {
     echo "Runner work root is already active for RUNNER_NAME=${RUNNER_NAME}." >&2
     return 1
   }
-  RUNNER_WORKDIR="${work_parent%/}/${RUNNER_NAME}"
+  if [[ -L "${work_parent}" ]]; then
+    echo "RUNNER_WORKDIR parent must not be a symbolic link." >&2
+    return 1
+  fi
+  mkdir -p -m 700 "${work_parent}"
+  work_root="${work_parent}/${RUNNER_NAME}"
+  if [[ -e "${work_root}" || -L "${work_root}" ]]; then
+    [[ -d "${work_root}" && ! -L "${work_root}" ]] || {
+      echo "Runner work root must be a real directory for RUNNER_NAME=${RUNNER_NAME}." >&2
+      return 1
+    }
+  else
+    mkdir -m 700 "${work_root}" || {
+      echo "Could not create runner work root safely for RUNNER_NAME=${RUNNER_NAME}." >&2
+      return 1
+    }
+  fi
+  RUNNER_WORKDIR="${work_root}"
   echo "WORK_ROOT_ADMISSION runner=${RUNNER_NAME} work=${RUNNER_WORKDIR} unique_by=runner-name lock=exclusive"
 }
 
