@@ -47,8 +47,9 @@ malformed, unsupported, hash-mismatched, or size-mismatched evidence aborts the 
 
 GitHub API and prior-artifact access run in a credential-scoped workflow step with only
 `actions: read`, `contents: read`, and `packages: read`. Registry inspection runs
-separately, strips both `GH_TOKEN` and `GITHUB_TOKEN` plus Actions runtime tokens from
-every subprocess, and uses a checkout that does not persist credentials.
+separately, strips both `GH_TOKEN` and `GITHUB_TOKEN` plus Actions runtime and OIDC
+request variables from every subprocess, and uses a checkout that does not persist
+credentials.
 
 This decision supersedes only ADR 0006's claim that package timestamps establish a
 fresh untagged grace period and strengthens its manifest-integrity requirements. ADR

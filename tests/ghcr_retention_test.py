@@ -647,18 +647,26 @@ class ExternalAdapterTests(unittest.TestCase):
                     retention.extract_plan_archive(archive)
 
     @mock.patch.object(retention.subprocess, "run")
-    def test_registry_adapter_binds_digest_and_strips_github_credentials(self, run):
+    def test_registry_adapter_binds_digest_and_strips_workflow_credentials(self, run):
         manifest = image_manifest()
         run.return_value = self.completed(manifest[1])
+        credential_keys = {
+            "ACTIONS_RUNTIME_TOKEN",
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+            "ACTIONS_ID_TOKEN_REQUEST_URL",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+        }
+        self.assertEqual(credential_keys, retention.SECRET_ENVIRONMENT_KEYS)
         with mock.patch.dict(
             os.environ,
-            {"GH_TOKEN": "secret", "GITHUB_TOKEN": "secret", "UNRELATED": "kept"},
+            {**dict.fromkeys(credential_keys, "secret"), "UNRELATED": "kept"},
         ):
             self.assertEqual(manifest[1], retention.RegistryApi().manifest(manifest[0]))
 
         environment = run.call_args.kwargs["env"]
-        self.assertNotIn("GH_TOKEN", environment)
-        self.assertNotIn("GITHUB_TOKEN", environment)
+        for name in credential_keys:
+            self.assertNotIn(name, environment)
         self.assertEqual("kept", environment["UNRELATED"])
 
     @mock.patch.object(retention.subprocess, "run")
