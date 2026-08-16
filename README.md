@@ -23,16 +23,22 @@ Apple Silicon Macs and ARM Linux — no emulation.
 
 ## Published images (GHCR) — build once in CI, pull everywhere
 
-This repo is the **single source of truth** for the runner image used by Verjson and
-Tequity. CI builds one shared artifact and pushes it to
-**`ghcr.io/verjson/gha-runner`** (public, so hosts pull with no credentials):
+This repo is the **single source of truth** for the runner image family used by Verjson
+and Tequity. CI publishes public, immutable candidates after `main` builds; an explicit
+release dispatch promotes their exact digests without rebuilding:
 
-| Tag | Contents |
-|-----|----------|
-| `:base`, `:latest` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, native addon toolchain, organization CI tools, non-root) |
-| `:rust` `:node` `:python` `:go` | base + that language toolchain |
-| `:pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
-| `:base-<sha>`, `:<kind>-<sha>` | commit-addressed tag — resolve its receipt and pin the digest downstream |
+| Repository | Variant |
+|------------|---------|
+| `ghcr.io/verjson/gha-runner` | base runner (`gh`, Docker CLI + buildx + compose, Node.js 24/npm, native addon toolchain, organization CI tools, non-root) |
+| `ghcr.io/verjson/gha-runner-rust` | base + Rust toolchain |
+| `ghcr.io/verjson/gha-runner-node` | base + Node.js tooling |
+| `ghcr.io/verjson/gha-runner-python` | base + Python tooling |
+| `ghcr.io/verjson/gha-runner-go` | base + Go toolchain |
+| `ghcr.io/verjson/gha-runner-pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
+
+Each repository receives `sha-<commit>` and `0.2.0-rc.<run>.<attempt>` candidate
+identities. Stable version aliases are written only by `.github/workflows/container-release.yml`.
+Automation consumes the signed release manifest's digests, never mutable aliases.
 
 - Every image preloads the immutable changelog engines listed in
   `images/changelog-tools.manifest` under `/opt/verjson/changelog-tools` and
@@ -331,7 +337,7 @@ lanes need it:
 
 ```sh
 docker build -f images/base.Dockerfile -t gha-runner:base .
-docker build -f Dockerfile.pwsh --build-arg BASE_IMAGE=gha-runner:base \
+docker build -f Dockerfile.pwsh --build-arg VERJSON_BASE_IMAGE=gha-runner:base \
   -t gha-runner:pwsh .
 ```
 
@@ -376,7 +382,8 @@ to it, so you can ignore groups entirely unless you want the access control.
 | `setup.ps1` | Interactive CLI for **Windows** (PowerShell) — same flow. |
 | `images/base.Dockerfile` | Base runner image (Ubuntu 26.04, non-root `runner`, shared `ci` tools). Every published variant builds `FROM` it. |
 | `images/<kind>.Dockerfile` | Language kinds (rust/node/python/go) layered on the base. |
-| `.github/workflows/publish-images.yml` | CI: build + push attested multi-arch images and retain immutable digest receipts. |
+| `.github/workflows/container-candidate.yml` | Canonical CI: validate pull requests and publish attested immutable candidates from `main`. |
+| `.github/workflows/container-release.yml` | Canonical explicit release: promote retained candidate digests without rebuilding. |
 | `entrypoint.sh` | Admits the exact `ci` contract before credentials, mints/uses a registration token, runs, and de-registers on stop. |
 | `docker-compose.yml` | Single-runner alternative with one-use PAT delivery. |
 | `Dockerfile.pwsh` | Published PowerShell variant layered on the attested base image. |

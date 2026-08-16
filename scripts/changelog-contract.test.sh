@@ -14,7 +14,7 @@
 # content are therefore derived from the tree, never named inline.
 set -euo pipefail
 
-CONTRACT_REF="653ad5457d220d8065d9f16dadf7f3c4563d81b8"
+CONTRACT_REF="4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9"
 CONTRACT_SHA256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 ADR_INDEX_SHA256="18d9eb95158d089e49b02f1bd868021c9e33a2fc946851c4d2efe98ec37b3729"
 EXPECTED_RELEASE_SCOPE="@verjson"

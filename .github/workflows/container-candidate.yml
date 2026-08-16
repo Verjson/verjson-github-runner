@@ -1,0 +1,25 @@
+# GENERATED FILE — do not edit by hand.
+# Contract: 4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9
+# Regenerate with:
+#   scripts/gen-container-candidate.sh workflow 4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9 container-candidate.json > .github/workflows/container-candidate.yml
+name: immutable container candidate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  candidate:
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9
+    with:
+      config-path: container-candidate.json
+      contract-ref: 4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9
+      acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
+    secrets:
+      NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}

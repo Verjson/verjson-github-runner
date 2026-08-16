@@ -32,17 +32,21 @@ func EnsureReady() error {
 }
 
 // Build builds an image from a Dockerfile. It streams output to the given writer so the
-// wizard can show progress. baseImage, when non-empty, is passed as the BASE_IMAGE build-arg.
+// wizard can show progress. baseImage, when non-empty, is passed as the canonical
+// base-image build arg.
 func Build(dockerfile, tag, baseImage string, out *os.File) error {
-	args := []string{"build", "-f", dockerfile, "-t", tag}
-	if baseImage != "" {
-		args = append(args, "--build-arg", "BASE_IMAGE="+baseImage)
-	}
-	args = append(args, ".")
-	cmd := exec.Command("docker", args...)
+	cmd := exec.Command("docker", buildArgs(dockerfile, tag, baseImage)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	return cmd.Run()
+}
+
+func buildArgs(dockerfile, tag, baseImage string) []string {
+	args := []string{"build", "-f", dockerfile, "-t", tag}
+	if baseImage != "" {
+		args = append(args, "--build-arg", "VERJSON_BASE_IMAGE="+baseImage)
+	}
+	return append(args, ".")
 }
 
 // RunSpec describes one runner container to launch.

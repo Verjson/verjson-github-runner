@@ -1,7 +1,7 @@
 # Go runner: official Go toolchain installed under /usr/local/go.
 # Build:  docker build -f images/go.Dockerfile -t gha-runner:go .
-ARG BASE_IMAGE=gha-runner:base
-FROM ${BASE_IMAGE}
+ARG VERJSON_BASE_IMAGE=gha-runner:base
+FROM ${VERJSON_BASE_IMAGE}
 
 ARG GO_VERSION=1.23.4
 # TARGETARCH is provided by BuildKit (amd64 / arm64) and matches Go's download naming.

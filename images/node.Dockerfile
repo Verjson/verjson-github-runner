@@ -1,7 +1,7 @@
 # Node runner: Node.js LTS + npm, pnpm, yarn.
 # Build:  docker build -f images/node.Dockerfile -t gha-runner:node .
-ARG BASE_IMAGE=gha-runner:base
-FROM ${BASE_IMAGE}
+ARG VERJSON_BASE_IMAGE=gha-runner:base
+FROM ${VERJSON_BASE_IMAGE}
 
 USER root
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \

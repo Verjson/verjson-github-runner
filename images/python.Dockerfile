@@ -1,7 +1,7 @@
 # Python runner: system Python 3 + pip/venv, plus the fast uv package manager.
 # Build:  docker build -f images/python.Dockerfile -t gha-runner:python .
-ARG BASE_IMAGE=gha-runner:base
-FROM ${BASE_IMAGE}
+ARG VERJSON_BASE_IMAGE=gha-runner:base
+FROM ${VERJSON_BASE_IMAGE}
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \

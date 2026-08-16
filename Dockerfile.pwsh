@@ -8,10 +8,10 @@
 #
 # Build (two steps — the base is images/base.Dockerfile from this same checkout):
 #   docker build -f images/base.Dockerfile -t gha-runner:base .
-#   docker build -f Dockerfile.pwsh --build-arg BASE_IMAGE=gha-runner:base \
+#   docker build -f Dockerfile.pwsh --build-arg VERJSON_BASE_IMAGE=gha-runner:base \
 #     -t gha-runner:pwsh .
-ARG BASE_IMAGE=gha-runner:base
-FROM ${BASE_IMAGE}
+ARG VERJSON_BASE_IMAGE=gha-runner:base
+FROM ${VERJSON_BASE_IMAGE}
 
 LABEL com.verjson.gha-runner.capability.pwsh="true"
 

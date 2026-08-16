@@ -4,11 +4,11 @@
 # produced in the same run with no registry in the loop. That check has to run on a
 # cache-capable builder (the gha cache exporter needs buildx's docker-container driver),
 # and that driver cannot resolve a tag from the local Docker image store the way the
-# previous `docker build` chain did. Bake resolves `FROM ${BASE_IMAGE}` through a
+# previous `docker build` chain did. Bake resolves `FROM ${VERJSON_BASE_IMAGE}` through a
 # `target:base` named context instead, which keeps the ordering guarantee without pushing
 # anything anywhere.
 #
-# Nothing here pushes or tags: publication stays in .github/workflows/publish-images.yml.
+# Nothing here pushes or tags: publication stays in the canonical candidate workflow.
 
 variable "PLATFORM" {
   default = "linux/amd64"
@@ -30,9 +30,9 @@ variable "CACHE_WRITE" {
 # One cache scope per image, never the default shared one. BuildKit keys its gha cache
 # index on the scope, so concurrent builds sharing a scope overwrite each other's index:
 # with seven builds on the default scope a warm re-run of an unchanged commit got zero
-# layer hits. The scope names match the ones publish-images.yml writes on every push to
+# layer hits. The scope names match the ones the candidate workflow writes on every push to
 # main, which is the cache a pull request inherits from its base branch — except `root`,
-# which publish-images.yml never builds, so that scope is only ever warmed by earlier
+# which the candidate workflow never builds, so that scope is only ever warmed by earlier
 # pushes to the same pull request.
 function "cache_from" {
   params = [scope]
@@ -65,7 +65,7 @@ target "base" {
   dockerfile = "images/base.Dockerfile"
 }
 
-# Every variant below points BASE_IMAGE at the `base` target above rather than at a
+# Every variant below points VERJSON_BASE_IMAGE at the `base` target above rather than at a
 # published tag, so a base change that breaks a variant fails here instead of after
 # publication. That ordering is the reason the pull request check exists.
 target "rust" {
@@ -74,7 +74,7 @@ target "rust" {
   cache-to   = cache_to_thin("rust")
   dockerfile = "images/rust.Dockerfile"
   contexts   = { base = "target:base" }
-  args       = { BASE_IMAGE = "base" }
+  args       = { VERJSON_BASE_IMAGE = "base" }
 }
 
 target "node" {
@@ -83,7 +83,7 @@ target "node" {
   cache-to   = cache_to_thin("node")
   dockerfile = "images/node.Dockerfile"
   contexts   = { base = "target:base" }
-  args       = { BASE_IMAGE = "base" }
+  args       = { VERJSON_BASE_IMAGE = "base" }
 }
 
 target "python" {
@@ -92,7 +92,7 @@ target "python" {
   cache-to   = cache_to_thin("python")
   dockerfile = "images/python.Dockerfile"
   contexts   = { base = "target:base" }
-  args       = { BASE_IMAGE = "base" }
+  args       = { VERJSON_BASE_IMAGE = "base" }
 }
 
 target "go" {
@@ -101,7 +101,7 @@ target "go" {
   cache-to   = cache_to_thin("go")
   dockerfile = "images/go.Dockerfile"
   contexts   = { base = "target:base" }
-  args       = { BASE_IMAGE = "base" }
+  args       = { VERJSON_BASE_IMAGE = "base" }
 }
 
 target "pwsh" {
@@ -110,7 +110,7 @@ target "pwsh" {
   cache-to   = cache_to_thin("pwsh")
   dockerfile = "Dockerfile.pwsh"
   contexts   = { base = "target:base" }
-  args       = { BASE_IMAGE = "base" }
+  args       = { VERJSON_BASE_IMAGE = "base" }
 }
 
 # The root Dockerfile has its own FROM and its own pins, independent of

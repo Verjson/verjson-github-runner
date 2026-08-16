@@ -18,8 +18,12 @@ jobs:
         run: bash tests/entrypoint_test.sh
       - name: Validate PowerShell setup architecture labels
         run: bash tests/setup_powershell_source_test.sh
-      - name: Validate image publication provenance contract
-        run: bash tests/publish_images_workflow_test.sh
+      - name: Validate canonical container lifecycle configuration
+        run: bash tests/container_release_workflow_test.sh
+      - name: Canonical container candidate contract holds
+        run: bash scripts/container-candidate-contract.test.sh
+      - name: Canonical container release contract holds
+        run: bash scripts/container-release-contract.test.sh
       - name: Validate pull request image build check contract
         run: bash tests/image_build_check_workflow_test.sh
       - name: Validate read-only cache inventory measurement

@@ -11,4 +11,8 @@
 .serena/
 .claude/settings.local.json
 .claude/.headroom_wrap_marker.json
+
+# Python test/runtime bytecode
+__pycache__/
+*.py[cod]
 AGENTS.md

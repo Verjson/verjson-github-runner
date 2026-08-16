@@ -28,7 +28,7 @@ hcl_target_names() {
 [[ -f "${bakefile}" ]] || fail "bake definition not found: ${bakefile}"
 
 # Every image the check builds must read from and write to the same BuildKit layer cache
-# that publish-images.yml populates on every push to main. Without it the check rebuilds
+# that the candidate workflow populates on every push to main. Without it the check rebuilds
 # the base image from scratch for every derived image on every pull request.
 bakefile_text="$(<"${bakefile}")"
 [[ "${bakefile_text}" == *'["type=gha,scope=${scope}"]'* ]] \
@@ -122,8 +122,8 @@ for target in rust node python go pwsh; do
   block="$(hcl_block "${target}")"
   [[ "${block}" == *'contexts   = { base = "target:base" }'* ]] \
     || fail "target '${target}' does not build on the base produced in the same run"
-  [[ "${block}" == *'args       = { BASE_IMAGE = "base" }'* ]] \
-    || fail "target '${target}' does not point BASE_IMAGE at that same-run base"
+  [[ "${block}" == *'args       = { VERJSON_BASE_IMAGE = "base" }'* ]] \
+    || fail "target '${target}' does not point VERJSON_BASE_IMAGE at that same-run base"
 done
 if grep -Fq 'ghcr.io' "${bakefile}"; then
   fail "bake definition must not resolve any image from a published registry tag"
@@ -138,6 +138,11 @@ paths="$(awk '
 ' "${workflow}")"
 [[ "${paths}" == *"      - docker-bake.hcl"* ]] \
   || fail "path filter does not re-run the check when the bake definition changes"
+[[ "${paths}" == *"      - .github/workflows/container-candidate.yml"* ]] \
+  && [[ "${paths}" == *"      - container-candidate.json"* ]] \
+  || fail "path filter does not re-run for canonical candidate contract changes"
+[[ "${paths}" != *"publish-images.yml"* ]] \
+  || fail "path filter still names the retired publication workflow"
 
 # The emulated arm64 leg builds pwsh on base too, so it is the same one-solve shape rather
 # than two invocations that each have to materialise the base.
@@ -172,7 +177,7 @@ arm64_job="$(awk '
 
 # The scheduled leg exists to catch drift a cache key cannot see — an upstream re-release
 # under an unchanged version. Reading the cache turns the checksum layer into a hit, so the
-# verification never runs; writing it clobbers the amd64 index publish-images.yml maintains
+# verification never runs; writing it clobbers the amd64 index the candidate workflow maintains
 # in the same scope on refs/heads/main.
 [[ "${arm64_job}" == *'CACHE_READ: "off"'* ]] \
   && [[ "${arm64_job}" == *'CACHE_WRITE: "off"'* ]] \
