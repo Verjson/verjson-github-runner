@@ -1,0 +1,38 @@
+# GENERATED FILE — do not edit by hand.
+# Contract: bced83b95e17c65ed4500c83756e2638f7dbb9d4
+# Regenerate with:
+#   scripts/gen-container-candidate.sh workflow bced83b95e17c65ed4500c83756e2638f7dbb9d4 container-candidate.json > .github/workflows/container-candidate.yml
+name: immutable container candidate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4
+    with:
+      config-path: container-candidate.json
+      contract-ref: bced83b95e17c65ed4500c83756e2638f7dbb9d4
+      acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      packages: write
+      id-token: write
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4
+    with:
+      config-path: container-candidate.json
+      contract-ref: bced83b95e17c65ed4500c83756e2638f7dbb9d4
+      acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
+

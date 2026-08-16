@@ -1,10 +1,9 @@
 name: image build check
 
-# publish-images.yml pushes :base/:latest to GHCR the moment a change lands on main, so a
-# broken image change (bad base codename, renamed apt package, checksum drift) is only
-# discovered once it is already the tag hosts pull. This builds the images on the pull
-# request instead. Build-only: nothing is pushed, so no registry credential is needed and
-# no tag is touched.
+# The canonical candidate workflow builds every pull request before it can publish an
+# immutable candidate from main. This local check keeps the fast amd64 Bake solve and the
+# scheduled cold arm64 drift probe. Build-only: nothing is pushed, so no registry
+# credential is needed and no tag is touched.
 on:
   pull_request:
     branches: [main]
@@ -15,7 +14,8 @@ on:
       - images/**
       - entrypoint.sh
       - .github/workflows/image-build-check.yml
-      - .github/workflows/publish-images.yml
+      - .github/workflows/container-candidate.yml
+      - container-candidate.json
   # The PR leg is amd64 only, so arm64-specific breakage — a stale GH_SHA256_ARM64 or
   # NODE_SHA256_ARM64 after an upstream re-release, an arm64-only package gap — still
   # reaches main unseen. The arm64 build is emulated and slow, too slow to put in front
@@ -45,7 +45,7 @@ permissions:
 
 jobs:
   # The amd64 legs answer "did this PR break the build?", so they stay on pull_request only:
-  # on a schedule they would re-prove what publish-images.yml already builds natively on
+  # on a schedule they would re-prove what the candidate workflow builds natively on
   # every push to main, and the cron exists purely for the arm64 gap below.
   base-and-kinds:
     if: github.event_name == 'pull_request' || inputs.build == 'amd64'
@@ -54,14 +54,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # The gha cache exporter only works on buildx's docker-container driver, so the
-      # builds below run through docker-bake.hcl, which wires each variant's BASE_IMAGE to
+      # builds below run through docker-bake.hcl, which wires each variant's
+      # VERJSON_BASE_IMAGE to
       # the base target rather than to a tag in the local daemon image store that this
       # driver cannot see. amd64 only — a PR check catches source breakage, not arch
-      # drift; the multi-arch build stays in publish-images.yml.
+      # drift; the multi-arch build stays in the canonical candidate workflow.
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       # One bake solve: the base is built once and the five variants that sit on it fan out
-      # concurrently, each still resolving BASE_IMAGE to that same-run base the way
-      # publish-images.yml wires it, so a base change that breaks a variant fails here too.
+      # concurrently, each still resolving VERJSON_BASE_IMAGE to that same-run base the
+      # way the candidate workflow wires it, so a base change that breaks a variant fails
+      # here too.
       - name: Build the base image and every variant on it
         uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         env:
@@ -105,7 +107,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Same QEMU pin as publish-images.yml, which is where the arm64 build otherwise runs.
+      # Same QEMU pin as the candidate workflow, where the arm64 build otherwise runs.
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Build the base image and the pwsh variant for arm64 under emulation
@@ -117,7 +119,7 @@ jobs:
           # Dockerfile is byte-identical. Reading the cache would turn the
           # `curl | sha256sum -c` layer into a hit, so the checksum this job exists to
           # verify would never re-run. Writing it would also clobber the amd64 index that
-          # publish-images.yml maintains in the same scope on refs/heads/main.
+          # the candidate workflow maintains in the same scope on refs/heads/main.
           CACHE_READ: "off"
           CACHE_WRITE: "off"
         with:

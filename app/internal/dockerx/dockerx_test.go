@@ -46,6 +46,18 @@ func TestContainerName(t *testing.T) {
 	}
 }
 
+func TestBuildArgsPassesTheCanonicalSameRunBaseImage(t *testing.T) {
+	args := buildArgs("images/node.Dockerfile", "gha-runner:node", "gha-runner:base")
+
+	want := []string{
+		"build", "-f", "images/node.Dockerfile", "-t", "gha-runner:node",
+		"--build-arg", "VERJSON_BASE_IMAGE=gha-runner:base", ".",
+	}
+	if !slices.Equal(args, want) {
+		t.Fatalf("buildArgs() = %v, want %v", args, want)
+	}
+}
+
 func TestEphemeralRunUsesSupervisorAndKeepsSocketOutOfJobByDefault(t *testing.T) {
 	args := runArgs(RunSpec{
 		Name: "isolated-1", Image: "gha-runner:node", URL: "https://github.com/Verjson",

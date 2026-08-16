@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "repository": "Verjson/verjson-github-runner",
+  "registryNamespace": "ghcr.io/verjson",
+  "nextStableVersion": "0.2.0",
+  "images": [
+    {
+      "variant": "base",
+      "repository": "ghcr.io/verjson/gha-runner",
+      "context": ".",
+      "file": "images/base.Dockerfile",
+      "platforms": [
+        {"os": "linux", "architecture": "amd64"},
+        {"os": "linux", "architecture": "arm64"}
+      ],
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      }
+    },
+    {
+      "variant": "rust",
+      "baseVariant": "base",
+      "repository": "ghcr.io/verjson/gha-runner-rust",
+      "context": ".",
+      "file": "images/rust.Dockerfile",
+      "platforms": [
+        {"os": "linux", "architecture": "amd64"},
+        {"os": "linux", "architecture": "arm64"}
+      ],
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      }
+    },
+    {
+      "variant": "node",
+      "baseVariant": "base",
+      "repository": "ghcr.io/verjson/gha-runner-node",
+      "context": ".",
+      "file": "images/node.Dockerfile",
+      "platforms": [
+        {"os": "linux", "architecture": "amd64"},
+        {"os": "linux", "architecture": "arm64"}
+      ],
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      }
+    },
+    {
+      "variant": "python",
+      "baseVariant": "base",
+      "repository": "ghcr.io/verjson/gha-runner-python",
+      "context": ".",
+      "file": "images/python.Dockerfile",
+      "platforms": [
+        {"os": "linux", "architecture": "amd64"},
+        {"os": "linux", "architecture": "arm64"}
+      ],
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      }
+    },
+    {
+      "variant": "go",
+      "baseVariant": "base",
+      "repository": "ghcr.io/verjson/gha-runner-go",
+      "context": ".",
+      "file": "images/go.Dockerfile",
+      "platforms": [
+        {"os": "linux", "architecture": "amd64"},
+        {"os": "linux", "architecture": "arm64"}
+      ],
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      }
+    },
+    {
+      "variant": "pwsh",
+      "baseVariant": "base",
+      "repository": "ghcr.io/verjson/gha-runner-pwsh",
+      "context": ".",
+      "file": "Dockerfile.pwsh",
+      "platforms": [
+        {"os": "linux", "architecture": "amd64"},
+        {"os": "linux", "architecture": "arm64"}
+      ],
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      }
+    }
+  ]
+}
