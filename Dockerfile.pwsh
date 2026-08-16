@@ -10,7 +10,8 @@
 #   docker build -f images/base.Dockerfile -t gha-runner:base .
 #   docker build -f Dockerfile.pwsh --build-arg VERJSON_BASE_IMAGE=gha-runner:base \
 #     -t gha-runner:pwsh .
-ARG VERJSON_BASE_IMAGE=gha-runner:base
+# Standalone builds use the public base; canonical publication overrides its exact digest.
+ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner:base
 FROM ${VERJSON_BASE_IMAGE}
 
 LABEL com.verjson.gha-runner.capability.pwsh="true"

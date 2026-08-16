@@ -72,8 +72,8 @@ PY
 for dockerfile in \
   images/rust.Dockerfile images/node.Dockerfile images/python.Dockerfile \
   images/go.Dockerfile Dockerfile.pwsh; do
-  grep -qx 'ARG VERJSON_BASE_IMAGE=gha-runner:base' "${root}/${dockerfile}" \
-    || fail "${dockerfile} does not accept the canonical same-run base digest argument"
+  grep -qx 'ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner:base' "${root}/${dockerfile}" \
+    || fail "${dockerfile} does not default standalone builds to the public base"
   grep -qx 'FROM ${VERJSON_BASE_IMAGE}' "${root}/${dockerfile}" \
     || fail "${dockerfile} does not build from the canonical same-run base digest"
 done

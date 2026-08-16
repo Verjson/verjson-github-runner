@@ -1,6 +1,7 @@
 # Python runner: system Python 3 + pip/venv, plus the fast uv package manager.
 # Build:  docker build -f images/python.Dockerfile -t gha-runner:python .
-ARG VERJSON_BASE_IMAGE=gha-runner:base
+# Standalone builds use the public base; canonical publication overrides its exact digest.
+ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner:base
 FROM ${VERJSON_BASE_IMAGE}
 
 USER root

@@ -1,6 +1,7 @@
 # Go runner: official Go toolchain installed under /usr/local/go.
 # Build:  docker build -f images/go.Dockerfile -t gha-runner:go .
-ARG VERJSON_BASE_IMAGE=gha-runner:base
+# Standalone builds use the public base; canonical publication overrides its exact digest.
+ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner:base
 FROM ${VERJSON_BASE_IMAGE}
 
 ARG GO_VERSION=1.23.4

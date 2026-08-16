@@ -1,6 +1,7 @@
 # Node runner: Node.js LTS + npm, pnpm, yarn.
 # Build:  docker build -f images/node.Dockerfile -t gha-runner:node .
-ARG VERJSON_BASE_IMAGE=gha-runner:base
+# Standalone builds use the public base; canonical publication overrides its exact digest.
+ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner:base
 FROM ${VERJSON_BASE_IMAGE}
 
 USER root
