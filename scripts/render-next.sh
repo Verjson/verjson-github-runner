@@ -8,8 +8,8 @@
 # render locally is what CI validates.
 set -euo pipefail
 
-CONTRACT_REF="f12dca7753739b292bf7795f43799b6ad1a54226"
-CONTRACT_SHA256="fe31ba44bee81a00f458129f7f0ac0a0712d28c88dc866ea08c54bb498d04d63"
+CONTRACT_REF="63fc49c68e46c1915bdc07db29d68f3f76d4377e"
+CONTRACT_SHA256="968021a0f3027d1d69eee95c18184cf7d1d483de6c5904dd66c45a96c79e7034"
 
 # --as-released is the only flag that passes through. It shows what a release
 # would write into CHANGELOG/<version>.md, which under ADR 0059 can never be
@@ -18,14 +18,26 @@ CONTRACT_SHA256="fe31ba44bee81a00f458129f7f0ac0a0712d28c88dc866ea08c54bb498d04d6
 # they are given (#443). Everything else is still refused: this is a renderer,
 # not a general front end to a pinned engine.
 as_released=
-if [ "$#" -gt 0 ]; then
-  if [ "$#" -eq 1 ] && [ "$1" = --as-released ]; then
-    as_released=--as-released
-  else
-    echo "render-next: unexpected argument '$1' (only --as-released is accepted)" >&2
-    exit 2
-  fi
-fi
+component=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --as-released)
+      [ -z "$as_released" ] || { echo "render-next: --as-released was repeated" >&2; exit 2; }
+      as_released=--as-released
+      shift
+      ;;
+    --component)
+      [ "$#" -ge 2 ] && [ -n "$2" ]         || { echo "render-next: --component requires a value" >&2; exit 2; }
+      [ -z "$component" ]         || { echo "render-next: --component was repeated" >&2; exit 2; }
+      component="$2"
+      shift 2
+      ;;
+    *)
+      echo "render-next: unexpected argument '$1'" >&2
+      exit 2
+      ;;
+  esac
+done
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -64,17 +76,24 @@ if [ -n "${CHANGELOG_CONTRACT_PATH:-}" ]; then
   contract_is_pinned "$contract" \
     || contract_fail "CHANGELOG_CONTRACT_PATH ($contract) is not the contract pinned at $CONTRACT_REF"
 else
-  cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/verjson-changelog/$CONTRACT_REF"
+  # Stable runner/bootstrap contract: preload
+  #   $VERJSON_CHANGELOG_TOOL_CACHE/<commit>/changelog.py
+  # or leave the variable unset for the per-user cache. The commit selects the
+  # location; CONTRACT_SHA256 still decides whether those bytes may execute.
+  cache_root="${VERJSON_CHANGELOG_TOOL_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/verjson-changelog}"
+  cache_dir="$cache_root/$CONTRACT_REF"
   contract="$cache_dir/changelog.py"
   if ! contract_is_pinned "$contract"; then
-    mkdir -p "$cache_dir"
+    mkdir -p "$cache_dir" \
+      || contract_fail "cannot create changelog tool cache directory $cache_dir"
     # mktemp, not a fixed name: concurrent runs share this cache directory.
-    tmp="$(mktemp "$cache_dir/.changelog.XXXXXX")"
+    tmp="$(mktemp "$cache_dir/.changelog.XXXXXX")" \
+      || contract_fail "cannot create a temporary changelog contract in $cache_dir"
     if ! curl -fsSL \
       "https://raw.githubusercontent.com/Verjson/.github/$CONTRACT_REF/scripts/changelog.py" \
       -o "$tmp"; then
       rm -f "$tmp"
-      contract_fail "cannot fetch the changelog contract at $CONTRACT_REF"
+      contract_fail "cannot fetch the changelog contract at $CONTRACT_REF and no verified cache entry is available at $contract; preload SHA-256 $CONTRACT_SHA256 and set VERJSON_CHANGELOG_TOOL_CACHE=$cache_root"
     fi
     # Verify before publishing into the cache, so a bad fetch is never persisted
     # for the next run to trust.
@@ -82,11 +101,12 @@ else
       rm -f "$tmp"
       contract_fail "fetched contract does not match the digest pinned at $CONTRACT_REF"
     fi
-    mv "$tmp" "$contract"
+    mv "$tmp" "$contract" \
+      || contract_fail "cannot publish the verified changelog contract to $contract"
   fi
 fi
 
-if [ -n "$as_released" ]; then
-  exec python3 "$contract" render-next --repo-root "$root" --as-released
-fi
-exec python3 "$contract" render-next --repo-root "$root"
+args=(render-next --repo-root "$root")
+[ -z "$component" ] || args+=(--component "$component")
+[ -z "$as_released" ] || args+=(--as-released)
+exec python3 "$contract" "${args[@]}"
