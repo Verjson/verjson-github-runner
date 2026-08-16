@@ -12,6 +12,10 @@ echo "Running entrypoint.sh unit tests..."
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+# GitHub-hosted test jobs export their own human-readable RUNNER_NAME. Runner
+# launch fixtures must not inherit that unrelated outer-runner identity.
+unset RUNNER_NAME
+
 cd "${TMP_DIR}"
 
 assert_eq() {
@@ -96,6 +100,26 @@ echo "Test: runner work roots are unique and isolate overlapping checkouts"
   set -e
   assert_eq "1" "${duplicate_status}" "Rejects a second active process for the same work root"
   assert_contains "already active" "${duplicate_output}" "Explains the duplicate work-root rejection"
+
+  for unsafe_name in "GitHub Actions 2" "../escape"; do
+    RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+    RUNNER_NAME="${unsafe_name}"
+    set +e
+    unsafe_output="$(resolve_runner_workdir 2>&1)"
+    unsafe_status=$?
+    set -e
+    assert_eq "1" "${unsafe_status}" "Rejects runner name '${unsafe_name}' as an unsafe path segment"
+    assert_contains "only letters" "${unsafe_output}" "Explains unsafe runner-name rejection"
+  done
+
+  RUNNER_WORKDIR=$'unsafe\nreceipt'
+  RUNNER_NAME="gha-general-12"
+  set +e
+  unsafe_output="$(resolve_runner_workdir 2>&1)"
+  unsafe_status=$?
+  set -e
+  assert_eq "1" "${unsafe_status}" "Rejects a newline-bearing work parent"
+  assert_contains "single-line" "${unsafe_output}" "Explains work-parent log-injection rejection"
 
   RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
   RUNNER_NAME="gha-general-11"
