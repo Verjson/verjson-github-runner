@@ -8,8 +8,8 @@
 # render locally is what CI validates.
 set -euo pipefail
 
-CONTRACT_REF="63fc49c68e46c1915bdc07db29d68f3f76d4377e"
-CONTRACT_SHA256="968021a0f3027d1d69eee95c18184cf7d1d483de6c5904dd66c45a96c79e7034"
+CONTRACT_REF="653ad5457d220d8065d9f16dadf7f3c4563d81b8"
+CONTRACT_SHA256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 
 # --as-released is the only flag that passes through. It shows what a release
 # would write into CHANGELOG/<version>.md, which under ADR 0059 can never be
