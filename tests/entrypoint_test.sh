@@ -77,6 +77,61 @@ assert_file_absent() {
   fi
 }
 
+# -----------------------------------------------------------------------------
+# Work-root isolation: different runner processes must never share a checkout.
+# -----------------------------------------------------------------------------
+echo "Test: runner work roots are unique and isolate overlapping checkouts"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+  RUNNER_NAME="gha-general-10"
+  resolve_runner_workdir >/dev/null
+  first_root="${RUNNER_WORKDIR}"
+
+  RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+  RUNNER_NAME="gha-general-10"
+  set +e
+  duplicate_output="$(resolve_runner_workdir 2>&1)"
+  duplicate_status=$?
+  set -e
+  assert_eq "1" "${duplicate_status}" "Rejects a second active process for the same work root"
+  assert_contains "already active" "${duplicate_output}" "Explains the duplicate work-root rejection"
+
+  RUNNER_WORKDIR="${TMP_DIR}/shared-parent"
+  RUNNER_NAME="gha-general-11"
+  resolve_runner_workdir >/dev/null
+  second_root="${RUNNER_WORKDIR}"
+
+  assert_eq "${TMP_DIR}/shared-parent/gha-general-10" "${first_root}" "Derives the first runner's work root from its name"
+  assert_eq "${TMP_DIR}/shared-parent/gha-general-11" "${second_root}" "Derives a distinct work root for the second runner"
+
+  git init -q --bare "${TMP_DIR}/origin.git"
+  git -C "${TMP_DIR}/origin.git" symbolic-ref HEAD refs/heads/main
+  git clone -q "${TMP_DIR}/origin.git" "${TMP_DIR}/seed"
+  (
+    cd "${TMP_DIR}/seed"
+    git config user.email test@example.invalid
+    git config user.name test
+    printf 'main\n' > ref.txt
+    git add ref.txt
+    git commit -qm main
+    git branch -M main
+    git push -q origin main
+    printf 'other\n' > ref.txt
+    git commit -qam other
+    git branch other
+    git push -q origin other
+  )
+  git clone -q "${TMP_DIR}/origin.git" "${first_root}/repo"
+  git clone -q "${TMP_DIR}/origin.git" "${second_root}/repo"
+  git -C "${first_root}/repo" checkout -q main
+  git -C "${second_root}/repo" checkout -q other
+
+  printf 'runner-one\n' > "${first_root}/repo/ref.txt"
+  assert_eq "other" "$(< "${second_root}/repo/ref.txt")" "An overlapping checkout cannot modify the other runner's worktree"
+  assert_eq "" "$(git -C "${second_root}/repo" status --porcelain)" "An overlapping checkout cannot modify the other runner's index"
+)
+
 mock_passing_ci_tools() {
   gh() { echo "gh $*" >> "${command_log}"; }
   docker() { echo "docker $*" >> "${command_log}"; }

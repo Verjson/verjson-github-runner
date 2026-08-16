@@ -149,6 +149,30 @@ initialize_runner_labels() {
   RUNNER_LABELS="self-hosted,linux,${architecture},docker"
 }
 
+resolve_runner_workdir() {
+  local work_parent="${RUNNER_WORKDIR:-_work}"
+  [[ "${RUNNER_NAME}" =~ ^[[:alnum:]_.-]+$ && "${RUNNER_NAME}" != "." && "${RUNNER_NAME}" != ".." ]] || {
+    echo "RUNNER_NAME must contain only letters, numbers, '.', '_', or '-' so it can identify an isolated work root." >&2
+    return 1
+  }
+  [[ -n "${work_parent}" && "${work_parent}" != *$'\n'* && "${work_parent}" != *$'\r'* ]] || {
+    echo "RUNNER_WORKDIR must name a non-empty, single-line parent directory." >&2
+    return 1
+  }
+  command -v flock >/dev/null 2>&1 || {
+    echo "Runner work-root admission requires flock." >&2
+    return 1
+  }
+  mkdir -p "${work_parent}"
+  exec {RUNNER_WORKDIR_LOCK_FD}>"${work_parent%/}/.${RUNNER_NAME}.work-root.lock"
+  flock -n "${RUNNER_WORKDIR_LOCK_FD}" || {
+    echo "Runner work root is already active for RUNNER_NAME=${RUNNER_NAME}." >&2
+    return 1
+  }
+  RUNNER_WORKDIR="${work_parent%/}/${RUNNER_NAME}"
+  echo "WORK_ROOT_ADMISSION runner=${RUNNER_NAME} work=${RUNNER_WORKDIR} unique_by=runner-name lock=exclusive"
+}
+
 validate_isolated_contract() {
   local required architecture
   labels_include untrusted-pr "${RUNNER_LABELS:-}" || return 0
@@ -653,7 +677,7 @@ main() {
   RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
   initialize_runner_labels || return 1
   RUNNER_GROUP="${RUNNER_GROUP:-Default}"
-  RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
+  resolve_runner_workdir || return 1
   normalize_ephemeral_mode || return 1
   if [[ "${RUNNER_EPHEMERAL_ENABLED}" == 1 && "${RUNNER_FRESH_CONTAINER:-0}" != 1 ]]; then
     echo "RUNNER_EPHEMERAL requires a fresh disposable container. Use the gha supervisor or set RUNNER_FRESH_CONTAINER=1 only from an external one-job container orchestrator." >&2
