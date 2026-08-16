@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
+import math
 import os
 import re
 import subprocess
 import sys
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -18,13 +21,17 @@ from typing import Any, Iterable
 
 
 OWNER = "Verjson"
+REPOSITORY = "Verjson/verjson-github-runner"
 PACKAGE = "gha-runner"
 IMAGE = "ghcr.io/verjson/gha-runner"
+WORKFLOW_FILE = "ghcr-retention.yml"
 POLICY = "ghcr-retention-v2"
 MINIMUM_AGE_DAYS = 30
 MAXIMUM_OBSERVATION_GAP_DAYS = 14
 MAXIMUM_MANIFEST_BYTES = 10 * 1024 * 1024
+MAXIMUM_ARTIFACT_BYTES = 20 * 1024 * 1024
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SYNTHETIC_ATTESTATION_TAG_RE = re.compile(r"^sha256-[0-9a-f]{64}$")
 INDEX_MEDIA_TYPES = {
     "application/vnd.oci.image.index.v1+json",
@@ -94,6 +101,16 @@ class CommandRunner:
 
 
 class GitHubApi:
+    @staticmethod
+    def _json_api(endpoint: str) -> Any:
+        return parse_json(
+            CommandRunner.run(
+                ["gh", "api", "-H", "Accept: application/vnd.github+json", endpoint],
+                allow_github_token=True,
+            ),
+            "gh",
+        )
+
     def package_versions(self) -> list[dict[str, Any]]:
         output = CommandRunner.run(
             [
@@ -112,6 +129,79 @@ class GitHubApi:
         if not all(isinstance(page, list) for page in pages):
             raise RetentionError("GitHub returned an invalid paginated package inventory")
         return [item for page in pages for item in page]
+
+    def previous_plan_evidence(
+        self, repository: str, current_run_id: int
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        runs = self._json_api(
+            f"/repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs"
+            "?branch=main&status=success&exclude_pull_requests=true&per_page=1"
+        )
+        if not isinstance(runs, dict) or not isinstance(runs.get("workflow_runs"), list):
+            raise RetentionError("GitHub returned invalid workflow-run evidence")
+        candidates = runs["workflow_runs"]
+        if len(candidates) != 1:
+            raise RetentionError("no unique latest successful workflow run is available")
+        run = candidates[0]
+        if not isinstance(run, dict):
+            raise RetentionError("GitHub returned an invalid workflow run")
+        source = source_identity(
+            repository=repository,
+            ref="refs/heads/main",
+            run_id=run.get("id"),
+            run_attempt=run.get("run_attempt"),
+            head_sha=run.get("head_sha"),
+        )
+        if (
+            source["run_id"] == current_run_id
+            or run.get("head_branch") != "main"
+            or run.get("status") != "completed"
+            or run.get("conclusion") != "success"
+            or not isinstance(run.get("repository"), dict)
+            or run["repository"].get("full_name") != repository
+            or not isinstance(run.get("head_repository"), dict)
+            or run["head_repository"].get("full_name") != repository
+        ):
+            raise RetentionError("latest successful workflow run has an invalid identity")
+
+        artifact_name = artifact_name_for(source)
+        artifacts_value = self._json_api(
+            f"/repos/{repository}/actions/runs/{source['run_id']}/artifacts?per_page=100"
+        )
+        if not isinstance(artifacts_value, dict) or not isinstance(
+            artifacts_value.get("artifacts"), list
+        ):
+            raise RetentionError("GitHub returned invalid artifact evidence")
+        artifacts = [
+            item
+            for item in artifacts_value["artifacts"]
+            if isinstance(item, dict) and item.get("name") == artifact_name
+        ]
+        if len(artifacts) != 1:
+            raise RetentionError("latest successful run has no unique retention artifact")
+        artifact = artifacts[0]
+        artifact_identity = validate_artifact_identity(artifact, source, artifact_name)
+        archive = CommandRunner.run(
+            [
+                "gh",
+                "api",
+                f"/repos/{repository}/actions/artifacts/{artifact_identity['id']}/zip",
+            ],
+            allow_github_token=True,
+        )
+        if len(archive) != artifact_identity["size_in_bytes"]:
+            raise RetentionError("artifact archive size does not match GitHub metadata")
+        archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+        if archive_digest != artifact_identity["digest"]:
+            raise RetentionError("artifact archive digest does not match GitHub metadata")
+        plan = extract_plan_archive(archive)
+        expected = {
+            "status": "selected",
+            "source": source,
+            "artifact": artifact_identity,
+        }
+        evidence = {**expected, "plan": plan}
+        return expected, evidence
 
 
 class RegistryApi:
@@ -142,14 +232,29 @@ def parse_json(raw: bytes, command: str) -> Any:
             value[key] = item
         return value
 
+    def finite_float(value: str) -> float:
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError(f"non-finite JSON number: {value}")
+        return parsed
+
     try:
-        return json.loads(raw, object_pairs_hook=unique_object)
+        return json.loads(
+            raw,
+            object_pairs_hook=unique_object,
+            parse_float=finite_float,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"non-finite JSON number: {value}")
+            ),
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         raise RetentionError(f"external command returned invalid JSON: {command}") from error
 
 
 def canonical_json(value: Any) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    return (
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+    ).encode()
 
 
 def sha256(value: Any) -> str:
@@ -168,6 +273,141 @@ def parse_time(value: str) -> datetime:
 
 def format_time(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def source_identity(
+    *, repository: Any, ref: Any, run_id: Any, run_attempt: Any, head_sha: Any
+) -> dict[str, Any]:
+    if repository != REPOSITORY:
+        raise RetentionError(f"invalid workflow repository identity: {repository!r}")
+    if not isinstance(ref, str) or not ref.startswith("refs/heads/"):
+        raise RetentionError(f"invalid workflow ref identity: {ref!r}")
+    if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
+        raise RetentionError(f"invalid workflow run id: {run_id!r}")
+    if not isinstance(run_attempt, int) or isinstance(run_attempt, bool) or run_attempt <= 0:
+        raise RetentionError(f"invalid workflow run attempt: {run_attempt!r}")
+    if not isinstance(head_sha, str) or not SHA_RE.fullmatch(head_sha):
+        raise RetentionError(f"invalid workflow head SHA: {head_sha!r}")
+    source = {
+        "repository": repository,
+        "ref": ref,
+        "run_id": run_id,
+        "run_attempt": run_attempt,
+        "head_sha": head_sha,
+    }
+    source["artifact_name"] = artifact_name_for(source)
+    return source
+
+
+def artifact_name_for(source: dict[str, Any]) -> str:
+    return f"ghcr-retention-plan-{source['run_id']}-{source['run_attempt']}"
+
+
+def validate_source_identity(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "repository",
+        "ref",
+        "run_id",
+        "run_attempt",
+        "head_sha",
+        "artifact_name",
+    }:
+        raise RetentionError("workflow source identity has invalid fields")
+    source = source_identity(
+        repository=value["repository"],
+        ref=value["ref"],
+        run_id=value["run_id"],
+        run_attempt=value["run_attempt"],
+        head_sha=value["head_sha"],
+    )
+    if value["artifact_name"] != source["artifact_name"]:
+        raise RetentionError("workflow artifact name does not match its run identity")
+    return source
+
+
+def validate_artifact_identity(
+    value: Any, source: dict[str, Any], expected_name: str | None = None
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RetentionError("artifact identity is invalid")
+    name = value.get("name")
+    artifact_id = value.get("id")
+    digest = value.get("digest")
+    size = value.get("size_in_bytes")
+    workflow_run = value.get("workflow_run")
+    if expected_name is None:
+        expected_name = artifact_name_for(source)
+    if name != expected_name:
+        raise RetentionError("artifact name does not match the selected workflow run")
+    if not isinstance(artifact_id, int) or isinstance(artifact_id, bool) or artifact_id <= 0:
+        raise RetentionError("artifact id is invalid")
+    if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+        raise RetentionError("artifact API digest is invalid")
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or size <= 0
+        or size > MAXIMUM_ARTIFACT_BYTES
+    ):
+        raise RetentionError("artifact archive size is invalid")
+    if value.get("expired") is not False:
+        raise RetentionError("artifact is expired or expiration state is unknown")
+    if not isinstance(workflow_run, dict):
+        raise RetentionError("artifact has no workflow-run binding")
+    if (
+        workflow_run.get("id") != source["run_id"]
+        or workflow_run.get("head_branch") != "main"
+        or workflow_run.get("head_sha") != source["head_sha"]
+    ):
+        raise RetentionError("artifact workflow-run binding does not match the selected run")
+    return {
+        "id": artifact_id,
+        "name": name,
+        "digest": digest,
+        "size_in_bytes": size,
+    }
+
+
+def validate_stored_artifact_identity(value: Any, source: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "id",
+        "name",
+        "digest",
+        "size_in_bytes",
+    }:
+        raise RetentionError("stored artifact identity has invalid fields")
+    synthetic = {
+        **value,
+        "expired": False,
+        "workflow_run": {
+            "id": source["run_id"],
+            "head_branch": "main",
+            "head_sha": source["head_sha"],
+        },
+    }
+    return validate_artifact_identity(synthetic, source)
+
+
+def extract_plan_archive(archive: bytes) -> dict[str, Any]:
+    if not archive or len(archive) > MAXIMUM_ARTIFACT_BYTES:
+        raise RetentionError("artifact archive has an invalid size")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            entries = bundle.infolist()
+            if len(entries) != 1 or entries[0].filename != "ghcr-retention-plan.json":
+                raise RetentionError("artifact archive does not contain exactly the expected plan")
+            entry = entries[0]
+            if entry.is_dir() or entry.flag_bits & 0x1 or entry.file_size > MAXIMUM_MANIFEST_BYTES:
+                raise RetentionError("artifact plan entry is unsafe or oversized")
+            raw = bundle.read(entry)
+    except RetentionError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile) as error:
+        raise RetentionError("artifact archive is invalid") from error
+    value = parse_json(raw, "artifact plan")
+    if not isinstance(value, dict):
+        raise RetentionError("artifact plan is not a JSON object")
+    return value
 
 
 def parse_versions(raw_versions: Iterable[dict[str, Any]]) -> list[Version]:
@@ -321,30 +561,75 @@ def inspect_manifests(api: RegistryApi, digests: Iterable[str]) -> dict[str, Man
 
 
 def verified_prior_observations(
-    prior_plan: dict[str, Any] | None, now: datetime
-) -> tuple[dict[tuple[int, str], datetime], str | None, str]:
-    if prior_plan is None:
-        return {}, None, "missing_prior_evidence"
+    prior_evidence: dict[str, Any] | None,
+    expected_prior: dict[str, Any] | None,
+    current_source: dict[str, Any],
+    now: datetime,
+) -> tuple[dict[tuple[int, str], datetime], str | None, str, dict[str, Any] | None]:
+    if current_source["ref"] != "refs/heads/main":
+        return {}, None, "non_main_source", None
+    if prior_evidence is None or expected_prior is None:
+        return {}, None, "missing_prior_evidence", None
     try:
+        if set(expected_prior) != {"status", "source", "artifact"}:
+            raise RetentionError("expected prior identity has invalid fields")
+        if expected_prior.get("status") != "selected":
+            raise RetentionError("expected prior identity did not select a run")
+        expected_source = validate_source_identity(expected_prior.get("source"))
+        expected_artifact = validate_stored_artifact_identity(
+            expected_prior.get("artifact"), expected_source
+        )
+        if expected_source["ref"] != "refs/heads/main":
+            raise RetentionError("expected prior identity is not from main")
+        if expected_source["run_id"] >= current_source["run_id"]:
+            raise RetentionError("prior workflow run does not precede the current run")
+        if set(prior_evidence) != {"status", "source", "artifact", "plan"}:
+            raise RetentionError("prior evidence has invalid fields")
+        if prior_evidence.get("status") != "selected":
+            raise RetentionError("prior evidence did not select a run")
+        evidence_source = validate_source_identity(prior_evidence.get("source"))
+        evidence_artifact = validate_stored_artifact_identity(
+            prior_evidence.get("artifact"), evidence_source
+        )
+        if evidence_source != expected_source or evidence_artifact != expected_artifact:
+            raise RetentionError("prior evidence does not match the latest selected run")
+        prior_plan = prior_evidence.get("plan")
+        if not isinstance(prior_plan, dict):
+            raise RetentionError("prior evidence has no plan")
         prior_hash = verify_plan(prior_plan)
+        if validate_source_identity(prior_plan.get("source")) != expected_source:
+            raise RetentionError("prior plan source does not match its artifact provenance")
         generated_at = parse_time(prior_plan["generated_at"])
         if generated_at >= now:
             raise RetentionError("prior observation is not older than the current plan")
         if now - generated_at > timedelta(days=MAXIMUM_OBSERVATION_GAP_DAYS):
             raise RetentionError("prior observation exceeds the continuity window")
         chain = prior_plan["observation_chain"]
-        if not isinstance(chain, dict):
+        if not isinstance(chain, dict) or set(chain) != {
+            "status",
+            "previous_plan_sha256",
+            "previous_source",
+            "previous_artifact",
+        }:
             raise RetentionError("prior observation chain metadata is invalid")
         chain_status = chain.get("status")
         previous_hash = chain.get("previous_plan_sha256")
         if chain_status == "continued":
             if not isinstance(previous_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_hash):
                 raise RetentionError("prior observation chain has no valid predecessor")
+            predecessor_source = validate_source_identity(chain.get("previous_source"))
+            validate_stored_artifact_identity(chain.get("previous_artifact"), predecessor_source)
+            if predecessor_source["ref"] != "refs/heads/main":
+                raise RetentionError("prior observation predecessor is not from main")
         elif chain_status in {
             "missing_prior_evidence",
             "untrusted_or_discontinuous_prior_evidence",
         }:
-            if previous_hash is not None:
+            if (
+                previous_hash is not None
+                or chain.get("previous_source") is not None
+                or chain.get("previous_artifact") is not None
+            ):
                 raise RetentionError("reset prior observation unexpectedly names a predecessor")
         else:
             raise RetentionError("prior observation chain status is invalid")
@@ -384,26 +669,36 @@ def verified_prior_observations(
         counts = prior_plan.get("counts")
         if not isinstance(counts, dict) or counts.get("untagged") != len(observations):
             raise RetentionError("prior observation count does not match its entries")
-        return observations, prior_hash, "continued"
+        return (
+            observations,
+            prior_hash,
+            "continued",
+            {"source": expected_source, "artifact": expected_artifact},
+        )
     except (KeyError, TypeError, RetentionError):
-        return {}, None, "untrusted_or_discontinuous_prior_evidence"
+        return {}, None, "untrusted_or_discontinuous_prior_evidence", None
 
 
 def build_plan(
     raw_versions: Iterable[dict[str, Any]],
     api: RegistryApi,
     now: datetime,
-    prior_plan: dict[str, Any] | None = None,
+    current_source: dict[str, Any],
+    prior_evidence: dict[str, Any] | None = None,
+    expected_prior: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if now.tzinfo is None:
         raise RetentionError("plan clock must be timezone-aware")
     now = now.astimezone(timezone.utc)
+    current_source = validate_source_identity(current_source)
     versions = parse_versions(raw_versions)
     for version in versions:
         if version.created_at > now or version.updated_at > now or version.updated_at < version.created_at:
             raise RetentionError(f"package version {version.id} has impossible timestamps")
     by_digest = {version.digest: version for version in versions}
-    prior_observations, prior_hash, continuity = verified_prior_observations(prior_plan, now)
+    prior_observations, prior_hash, continuity, prior_provenance = verified_prior_observations(
+        prior_evidence, expected_prior, current_source, now
+    )
 
     dependencies: dict[str, set[str]] = {digest: set() for digest in by_digest}
     parents: dict[str, set[str]] = {digest: set() for digest in by_digest}
@@ -493,6 +788,7 @@ def build_plan(
         "owner": OWNER,
         "package": PACKAGE,
         "image": IMAGE,
+        "source": current_source,
         "generated_at": format_time(now),
         "minimum_age_days": MINIMUM_AGE_DAYS,
         "maximum_observation_gap_days": MAXIMUM_OBSERVATION_GAP_DAYS,
@@ -500,6 +796,8 @@ def build_plan(
         "observation_chain": {
             "status": continuity,
             "previous_plan_sha256": prior_hash,
+            "previous_source": prior_provenance["source"] if prior_provenance else None,
+            "previous_artifact": prior_provenance["artifact"] if prior_provenance else None,
         },
         "pruning_authorized": False,
         "authorization_blockers": [
@@ -554,6 +852,10 @@ def verify_plan(plan: dict[str, Any]) -> str:
     actual = sha256(unsigned)
     if not isinstance(expected, str) or expected != actual:
         raise RetentionError("retention plan hash does not match its contents")
+    try:
+        validate_source_identity(plan.get("source"))
+    except RetentionError as error:
+        raise RetentionError("retention plan has an invalid source identity") from error
     if (
         plan.get("schema_version") != 2
         or plan.get("policy") != POLICY
@@ -596,9 +898,21 @@ def parser() -> argparse.ArgumentParser:
     subcommands = root.add_subparsers(dest="command", required=True)
     inventory = subcommands.add_parser("inventory")
     inventory.add_argument("--output", type=Path, required=True)
+    prior = subcommands.add_parser("prior-evidence")
+    prior.add_argument("--repository", required=True)
+    prior.add_argument("--ref", required=True)
+    prior.add_argument("--current-run-id", type=int, required=True)
+    prior.add_argument("--expected-output", type=Path, required=True)
+    prior.add_argument("--evidence-output", type=Path, required=True)
     plan = subcommands.add_parser("plan")
     plan.add_argument("--inventory", type=Path, required=True)
-    plan.add_argument("--prior-plan", type=Path)
+    plan.add_argument("--prior-evidence", type=Path)
+    plan.add_argument("--expected-prior", type=Path)
+    plan.add_argument("--repository", required=True)
+    plan.add_argument("--ref", required=True)
+    plan.add_argument("--run-id", type=int, required=True)
+    plan.add_argument("--run-attempt", type=int, required=True)
+    plan.add_argument("--head-sha", required=True)
     plan.add_argument("--output", type=Path, required=True)
     return root
 
@@ -609,6 +923,29 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inventory":
             write_json(args.output, GitHubApi().package_versions())
             return 0
+        if args.command == "prior-evidence":
+            args.expected_output.unlink(missing_ok=True)
+            args.evidence_output.unlink(missing_ok=True)
+            if args.repository != REPOSITORY or args.ref != "refs/heads/main":
+                write_json(
+                    args.expected_output,
+                    {"status": "reset", "reason": "untrusted_repository_or_non_main_ref"},
+                )
+                return 0
+            try:
+                expected, evidence = GitHubApi().previous_plan_evidence(
+                    args.repository, args.current_run_id
+                )
+            except RetentionError as error:
+                write_json(
+                    args.expected_output,
+                    {"status": "reset", "reason": "latest_prior_evidence_unavailable"},
+                )
+                print(f"ghcr retention: prior observation reset: {error}", file=sys.stderr)
+                return 0
+            write_json(args.expected_output, expected)
+            write_json(args.evidence_output, evidence)
+            return 0
         inventory = read_json(args.inventory)
         if not isinstance(inventory, list):
             raise RetentionError("inventory input is not a list")
@@ -616,7 +953,15 @@ def main(argv: list[str] | None = None) -> int:
             inventory,
             RegistryApi(),
             datetime.now(timezone.utc),
-            read_optional_json(args.prior_plan),
+            source_identity(
+                repository=args.repository,
+                ref=args.ref,
+                run_id=args.run_id,
+                run_attempt=args.run_attempt,
+                head_sha=args.head_sha,
+            ),
+            read_optional_json(args.prior_evidence),
+            read_optional_json(args.expected_prior),
         )
         write_json(args.output, plan)
         print(json.dumps({"plan_sha256": plan["plan_sha256"], **plan["counts"]}, sort_keys=True))

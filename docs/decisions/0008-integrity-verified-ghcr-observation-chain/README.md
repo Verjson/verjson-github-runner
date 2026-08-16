@@ -22,12 +22,22 @@ from the referenced manifest bytes.
 
 The planner starts an untagged version's age floor at the first time a read-only plan
 observes that exact package-version ID and digest without tags. It carries that time
-forward only from a prior main-branch workflow artifact whose canonical plan hash,
-schema, policy, identity, timestamps, and observation entries verify. The prior plan
-must be older than the current plan and no more than 14 days old. A missing, stale,
-malformed, replayed, future-dated, or otherwise discontinuous plan resets the floor;
-a version absent or tagged in the prior inventory also starts a new floor. This makes
-lost evidence reduce candidates to zero rather than shorten the grace period.
+forward only from the immediate latest successful main-branch workflow run selected by
+the GitHub API. Each plan records its repository, full ref, run ID, run attempt, head
+SHA, and deterministic artifact name. Before reuse, the downloaded evidence must match
+that exact source plus the API artifact name, ID, size, and SHA-256 digest; the archive
+must contain exactly one root `ghcr-retention-plan.json` entry whose canonical plan
+hash, schema, policy, identity, timestamps, and observation entries verify. Selecting a
+penultimate in-window artifact is therefore a discontinuity, not a valid replay.
+
+The prior plan must be older than the current plan and no more than 14 days old. A
+missing, stale, malformed, replayed, future-dated, or otherwise discontinuous plan
+resets the floor; a version absent or tagged in the prior inventory also starts a new
+floor. Non-main runs never carry prior observations, and prior-evidence preparation
+removes its exact output paths before any branch or availability decision so tracked or
+stale workspace files cannot become evidence. JSON parsing rejects duplicate keys and
+non-finite numbers at every external boundary. Lost evidence reduces candidates to zero
+rather than shortening the grace period.
 
 Every fetched raw manifest is hashed byte-for-byte and must match the requested SHA-256
 digest before it can contribute evidence. Each graph edge to an inventory manifest must
@@ -35,9 +45,10 @@ also declare the exact fetched byte length. These rules cover OCI and Docker ind
 image manifests, OCI artifact manifests, and subject/referrer relationships. Missing,
 malformed, unsupported, hash-mismatched, or size-mismatched evidence aborts the plan.
 
-GitHub API and prior-artifact access run in a credential-scoped workflow step. Registry
-inspection runs separately, strips GitHub token variables from every subprocess, and
-uses a checkout that does not persist credentials.
+GitHub API and prior-artifact access run in a credential-scoped workflow step with only
+`actions: read`, `contents: read`, and `packages: read`. Registry inspection runs
+separately, strips both `GH_TOKEN` and `GITHUB_TOKEN` plus Actions runtime tokens from
+every subprocess, and uses a checkout that does not persist credentials.
 
 This decision supersedes only ADR 0006's claim that package timestamps establish a
 fresh untagged grace period and strengthens its manifest-integrity requirements. ADR

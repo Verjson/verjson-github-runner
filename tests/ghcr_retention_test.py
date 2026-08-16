@@ -2,11 +2,14 @@
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -99,10 +102,50 @@ class RetentionPlanTests(unittest.TestCase):
         self.now = datetime(2026, 8, 16, tzinfo=timezone.utc)
         self.old = "2026-06-01T00:00:00Z"
         self.young = "2026-08-10T00:00:00Z"
+        self.run_id = 1000
 
-    def build(self, versions, manifests, now=None, prior=None):
+    def source(self, ref="refs/heads/main"):
+        self.run_id += 1
+        return retention.source_identity(
+            repository=retention.REPOSITORY,
+            ref=ref,
+            run_id=self.run_id,
+            run_attempt=1,
+            head_sha=f"{self.run_id:040x}",
+        )
+
+    def evidence_for(self, plan):
+        source = plan["source"]
+        artifact = {
+            "id": source["run_id"] + 10000,
+            "name": source["artifact_name"],
+            "digest": "sha256:" + "a" * 64,
+            "size_in_bytes": 100,
+        }
+        expected = {"status": "selected", "source": source, "artifact": artifact}
+        return expected, {**expected, "plan": plan}
+
+    def build(
+        self,
+        versions,
+        manifests,
+        now=None,
+        prior=None,
+        source=None,
+        expected=None,
+        evidence=None,
+    ):
+        if prior is not None and evidence is None:
+            expected_from_plan, evidence = self.evidence_for(prior)
+            if expected is None:
+                expected = expected_from_plan
         return retention.build_plan(
-            versions, FakeRegistry(manifests), now or self.now, prior
+            versions,
+            FakeRegistry(manifests),
+            now or self.now,
+            source or self.source(),
+            evidence,
+            expected,
         )
 
     def continuous_plan(self, versions, manifests):
@@ -236,6 +279,88 @@ class RetentionPlanTests(unittest.TestCase):
                 )
                 self.assertEqual(expected, plan["observation_chain"]["status"])
 
+    def test_replayed_penultimate_plan_cannot_satisfy_latest_run_identity(self):
+        image = image_manifest(marker="5")
+        versions = [raw_version(1, image[0], self.old)]
+        manifests = {image[0]: image[1]}
+        prior = None
+        plans = []
+        observed = datetime(2026, 7, 1, tzinfo=timezone.utc)
+        while observed < self.now:
+            prior = self.build(versions, manifests, observed, prior)
+            plans.append(prior)
+            observed += timedelta(days=7)
+        expected_latest, _ = self.evidence_for(plans[-1])
+        _, replayed_evidence = self.evidence_for(plans[-2])
+
+        plan = self.build(
+            versions,
+            manifests,
+            evidence=replayed_evidence,
+            expected=expected_latest,
+        )
+
+        self.assertEqual([], plan["policy_candidates"])
+        self.assertEqual(
+            "untrusted_or_discontinuous_prior_evidence",
+            plan["observation_chain"]["status"],
+        )
+
+    def test_time_rollback_and_non_main_source_reset_observation_age(self):
+        image = image_manifest(marker="6")
+        versions = [raw_version(1, image[0], self.old)]
+        manifests = {image[0]: image[1]}
+        future_prior = self.build(versions, manifests, self.now)
+
+        rollback = self.build(
+            versions,
+            manifests,
+            self.now - timedelta(days=1),
+            future_prior,
+        )
+        non_main = self.build(
+            versions,
+            manifests,
+            prior=future_prior,
+            source=self.source("refs/heads/review"),
+        )
+
+        self.assertEqual([], rollback["policy_candidates"])
+        self.assertEqual(
+            "untrusted_or_discontinuous_prior_evidence",
+            rollback["observation_chain"]["status"],
+        )
+        self.assertEqual([], non_main["policy_candidates"])
+        self.assertEqual("non_main_source", non_main["observation_chain"]["status"])
+        self.assertEqual("refs/heads/review", non_main["source"]["ref"])
+
+    def test_non_main_prior_command_removes_stale_workspace_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            expected = Path(directory) / "expected.json"
+            evidence = Path(directory) / "evidence.json"
+            expected.write_text('{"forged":true}')
+            evidence.write_text('{"forged":true}')
+
+            result = retention.main(
+                [
+                    "prior-evidence",
+                    "--repository",
+                    retention.REPOSITORY,
+                    "--ref",
+                    "refs/heads/review",
+                    "--current-run-id",
+                    "2000",
+                    "--expected-output",
+                    str(expected),
+                    "--evidence-output",
+                    str(evidence),
+                ]
+            )
+
+            self.assertEqual(0, result)
+            self.assertFalse(evidence.exists())
+            self.assertEqual("reset", json.loads(expected.read_text())["status"])
+
     def test_registry_failure_fails_the_whole_plan(self):
         image = image_manifest()
         with self.assertRaisesRegex(retention.RetentionError, "registry unavailable"):
@@ -360,6 +485,13 @@ class ExternalAdapterTests(unittest.TestCase):
     def completed(self, stdout=b"", stderr=b""):
         return subprocess.CompletedProcess([], 0, stdout=stdout, stderr=stderr)
 
+    def archive(self, entries=None):
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as bundle:
+            for name, value in entries or [("ghcr-retention-plan.json", b'{"plan":true}')]:
+                bundle.writestr(name, value)
+        return output.getvalue()
+
     @mock.patch.object(retention.subprocess, "run")
     def test_github_pagination_accepts_slurped_pages_and_single_page_shape(self, run):
         for payload in ([[{"id": 1}], [{"id": 2}]], [{"id": 1}]):
@@ -391,6 +523,129 @@ class ExternalAdapterTests(unittest.TestCase):
                 with self.assertRaises(retention.RetentionError):
                     retention.GitHubApi().package_versions()
 
+    def test_non_finite_json_numbers_fail_closed_at_every_parser_boundary(self):
+        for value in (b"NaN", b"Infinity", b"-Infinity", b"1e999", b'{"value":NaN}'):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(retention.RetentionError, "invalid JSON"):
+                    retention.parse_json(value, "test")
+
+    @mock.patch.object(retention.CommandRunner, "run")
+    @mock.patch.object(retention.GitHubApi, "_json_api")
+    def test_latest_successful_artifact_is_bound_to_run_and_api_digest(self, json_api, run):
+        archive = self.archive()
+        source = retention.source_identity(
+            repository=retention.REPOSITORY,
+            ref="refs/heads/main",
+            run_id=800,
+            run_attempt=2,
+            head_sha="b" * 40,
+        )
+        json_api.side_effect = [
+            {
+                "workflow_runs": [
+                    {
+                        "id": 800,
+                        "run_attempt": 2,
+                        "head_sha": "b" * 40,
+                        "head_branch": "main",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "repository": {"full_name": retention.REPOSITORY},
+                        "head_repository": {"full_name": retention.REPOSITORY},
+                    }
+                ]
+            },
+            {
+                "artifacts": [
+                    {
+                        "id": 900,
+                        "name": source["artifact_name"],
+                        "digest": "sha256:" + hashlib.sha256(archive).hexdigest(),
+                        "size_in_bytes": len(archive),
+                        "expired": False,
+                        "workflow_run": {
+                            "id": 800,
+                            "head_branch": "main",
+                            "head_sha": "b" * 40,
+                        },
+                    }
+                ]
+            },
+        ]
+        run.return_value = archive
+
+        expected, evidence = retention.GitHubApi().previous_plan_evidence(
+            retention.REPOSITORY, 801
+        )
+
+        self.assertEqual(source, expected["source"])
+        self.assertEqual(900, expected["artifact"]["id"])
+        self.assertEqual(expected["artifact"], evidence["artifact"])
+        runs_endpoint = json_api.call_args_list[0].args[0]
+        self.assertIn("branch=main", runs_endpoint)
+        self.assertIn("status=success", runs_endpoint)
+        self.assertIn("per_page=1", runs_endpoint)
+
+    @mock.patch.object(retention.CommandRunner, "run")
+    @mock.patch.object(retention.GitHubApi, "_json_api")
+    def test_artifact_digest_mismatch_fails_closed(self, json_api, run):
+        archive = self.archive()
+        source = retention.source_identity(
+            repository=retention.REPOSITORY,
+            ref="refs/heads/main",
+            run_id=800,
+            run_attempt=1,
+            head_sha="c" * 40,
+        )
+        json_api.side_effect = [
+            {
+                "workflow_runs": [
+                    {
+                        "id": 800,
+                        "run_attempt": 1,
+                        "head_sha": "c" * 40,
+                        "head_branch": "main",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "repository": {"full_name": retention.REPOSITORY},
+                        "head_repository": {"full_name": retention.REPOSITORY},
+                    }
+                ]
+            },
+            {
+                "artifacts": [
+                    {
+                        "id": 900,
+                        "name": source["artifact_name"],
+                        "digest": "sha256:" + "d" * 64,
+                        "size_in_bytes": len(archive),
+                        "expired": False,
+                        "workflow_run": {
+                            "id": 800,
+                            "head_branch": "main",
+                            "head_sha": "c" * 40,
+                        },
+                    }
+                ]
+            },
+        ]
+        run.return_value = archive
+
+        with self.assertRaisesRegex(retention.RetentionError, "digest does not match"):
+            retention.GitHubApi().previous_plan_evidence(retention.REPOSITORY, 801)
+
+    def test_artifact_archive_requires_one_exact_plan_entry(self):
+        cases = [
+            self.archive([("nested/ghcr-retention-plan.json", b"{}")]),
+            self.archive(
+                [("ghcr-retention-plan.json", b"{}"), ("unexpected.json", b"{}")]
+            ),
+        ]
+        for archive in cases:
+            with self.subTest(entries=len(zipfile.ZipFile(io.BytesIO(archive)).infolist())):
+                with self.assertRaisesRegex(retention.RetentionError, "exactly the expected plan"):
+                    retention.extract_plan_archive(archive)
+
     @mock.patch.object(retention.subprocess, "run")
     def test_registry_adapter_binds_digest_and_strips_github_credentials(self, run):
         manifest = image_manifest()
@@ -405,6 +660,17 @@ class ExternalAdapterTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN", environment)
         self.assertNotIn("GITHUB_TOKEN", environment)
         self.assertEqual("kept", environment["UNRELATED"])
+
+    @mock.patch.object(retention.subprocess, "run")
+    def test_registry_invalid_output_and_timeout_fail_closed(self, run):
+        invalid = b'{"schemaVersion":NaN}'
+        requested = "sha256:" + hashlib.sha256(invalid).hexdigest()
+        run.return_value = self.completed(invalid)
+        with self.assertRaisesRegex(retention.RetentionError, "invalid JSON"):
+            retention.RegistryApi().manifest(requested)
+        run.side_effect = subprocess.TimeoutExpired(["docker"], 60)
+        with self.assertRaisesRegex(retention.RetentionError, "external command failed: docker"):
+            retention.RegistryApi().manifest(requested)
 
 
 if __name__ == "__main__":
