@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-16
 - **Issue:** [#144](https://github.com/Verjson/verjson-github-runner/issues/144)
-- **Supersedes:** The merge-driven stable-publication portion of [ADR 0001](../0001-attested-ci-runner-contract/README.md)
+- **Supersedes:** The merge-driven stable-publication and single-package storage-topology portions of [ADR 0001](../0001-attested-ci-runner-contract/README.md)
 - **Organization decision:** [Verjson/.github ADR 0078](https://github.com/Verjson/.github/tree/4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9/docs/decisions/0078-container-release-and-runner-deployment-contract)
 - **Category:** Release authority and production credentials — **sensitive class**
 
@@ -18,6 +18,12 @@ The organization container contract now separates pull-request validation, immut
 main-branch candidates, stable promotion, and production deployment. Issue #144 adopts
 that contract for the complete runner image family.
 
+ADR 0001 coupled a shared cross-organization capability contract to storage in one GHCR
+package. The canonical candidate identity uses the same candidate version for every
+variant, so each variant needs its own package to prevent tag collisions. This changes
+only storage topology; the runner family still shares one capability and provenance
+contract across organizations.
+
 ## Decision
 
 Pull requests build the complete `base`, `rust`, `node`, `python`, `go`, and `pwsh`
@@ -31,12 +37,13 @@ version. Promotion copies the exact candidate digests to stable aliases and must
 invoke a Dockerfile or rebuild an image. The signed release manifest is authoritative;
 mutable aliases are conveniences and are never deployment inputs.
 
-This decision supersedes only ADR 0001's merge-driven stable-publication workflow and
-its legacy signer-workflow path. ADR 0001's single shared runner artifact, admission
-matrix, exact base-digest layering, multi-architecture requirement, provenance,
-BuildKit SBOM, GitHub attestation, immutable receipt, and digest-only deployment
-decisions remain in force. The signer identity becomes the pinned canonical candidate
-workflow recorded in `container-candidate.json`.
+This decision supersedes ADR 0001's merge-driven stable-publication workflow, legacy
+signer-workflow path, and requirement that every variant share one GHCR package. ADR
+0001's shared capability contract, admission matrix, exact base-digest layering,
+multi-architecture requirement, provenance, BuildKit SBOM, GitHub attestation,
+immutable receipts, and digest-only deployment decisions remain in force. The signer
+identity becomes the pinned canonical candidate workflow recorded in
+`container-candidate.json`.
 
 ## Consequences
 
@@ -44,6 +51,8 @@ workflow recorded in `container-candidate.json`.
 - Stable release authority is explicit, versioned, auditable, and does not rebuild.
 - Every derived image is published in its own repository so one variant cannot replace
   another variant's candidate or stable alias.
+- The runner family remains one shared cross-organization capability and provenance
+  contract even though variants use separate GHCR packages.
 - Production rollout consumes the signed release manifest and remains a separate
   operation with its own deployment controls.
 

@@ -8,6 +8,7 @@ candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
 contract_ref="4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
+base_image="ghcr.io/verjson/gha-runner@sha256:d97a218b5c7834f1a34fc4e13760ad16b692504dc79c38f92a1a8bb3b286db85"
 
 fail() {
   echo "container release workflow contract: $*" >&2
@@ -72,8 +73,8 @@ PY
 for dockerfile in \
   images/rust.Dockerfile images/node.Dockerfile images/python.Dockerfile \
   images/go.Dockerfile Dockerfile.pwsh; do
-  grep -qx 'ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner:base' "${root}/${dockerfile}" \
-    || fail "${dockerfile} does not default standalone builds to the public base"
+  grep -qx "ARG VERJSON_BASE_IMAGE=${base_image}" "${root}/${dockerfile}" \
+    || fail "${dockerfile} does not default standalone builds to the verified base digest"
   grep -qx 'FROM ${VERJSON_BASE_IMAGE}' "${root}/${dockerfile}" \
     || fail "${dockerfile} does not build from the canonical same-run base digest"
 done

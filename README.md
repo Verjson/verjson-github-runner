@@ -248,9 +248,10 @@ target it via `runs-on`:
 | **PowerShell** | Base + pinned PowerShell | `[self-hosted, pwsh]` |
 
 Language kinds live in `images/<kind>.Dockerfile`; the published PowerShell variant uses
-the single root `Dockerfile.pwsh`. Standalone builds default to the public
-`ghcr.io/verjson/gha-runner:base`; canonical publication overrides that mutable fallback
-with the exact same-run base digest.
+the single root `Dockerfile.pwsh`. Standalone builds default to the verified public base
+digest `ghcr.io/verjson/gha-runner@sha256:d97a218b5c7834f1a34fc4e13760ad16b692504dc79c38f92a1a8bb3b286db85`;
+canonical publication overrides that immutable fallback with the exact same-run base
+digest.
 
 > **Auth note:** In ephemeral mode, only the controller holds your renewable
 > `gh` OAuth token. It mints a short-lived, one-shot registration token for each
