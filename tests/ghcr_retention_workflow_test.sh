@@ -24,6 +24,12 @@ grep -Fq -- '--prior-evidence ghcr-prior-evidence.json' "$workflow" \
   || fail "durable prior evidence is not consumed"
 grep -Fq "ghcr-retention-plan-\${{ github.run_id }}-\${{ github.run_attempt }}" "$workflow" \
   || fail "artifact identity is not bound to run id and attempt"
+grep -Fq 'ghcr_retention.py preview' "$workflow" \
+  || fail "held deletion preview is missing"
+grep -Fq 'deletion_authorized' "$workflow" \
+  || fail "preview does not state deletion authorization"
+grep -Fq "ghcr-retention-preview-\${{ github.run_id }}-\${{ github.run_attempt }}" "$workflow" \
+  || fail "preview artifact identity is not bound to run id and attempt"
 
 plan_step="$(sed -n '/- name: Build fail-closed retention plan/,/- name: Upload auditable dry-run plan/p' "$workflow")"
 if grep -Fq 'GH_TOKEN' <<<"$plan_step"; then
