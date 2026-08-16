@@ -24,6 +24,10 @@ jobs:
         run: bash tests/image_build_check_workflow_test.sh
       - name: Validate read-only cache inventory measurement
         run: bash tests/cache_inventory_test.sh
+      - name: Validate fail-closed GHCR retention policy
+        run: |
+          python3 tests/ghcr_retention_test.py
+          bash tests/ghcr_retention_workflow_test.sh
       - name: Validate verified changelog tooling cache
         run: bash tests/changelog_tool_cache_test.sh
       - name: Prove ephemeral jobs receive fresh writable layers

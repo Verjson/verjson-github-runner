@@ -1,8 +1,8 @@
-# 0001: Attested `ci` runner contract
+# 0001 — Attested `ci` runner contract
 
-- Status: Accepted
-- Date: 2026-07-27
-- Issue: [Verjson/verjson-github-runner#29](https://github.com/Verjson/verjson-github-runner/issues/29)
+- **Status:** Accepted
+- **Date:** 2026-07-27
+- **Issue:** [Verjson/verjson-github-runner#29](https://github.com/Verjson/verjson-github-runner/issues/29)
 
 ## Context
 

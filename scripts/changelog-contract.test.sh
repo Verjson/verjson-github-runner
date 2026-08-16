@@ -14,13 +14,19 @@
 # content are therefore derived from the tree, never named inline.
 set -euo pipefail
 
-CONTRACT_REF="f12dca7753739b292bf7795f43799b6ad1a54226"
-CONTRACT_SHA256="fe31ba44bee81a00f458129f7f0ac0a0712d28c88dc866ea08c54bb498d04d63"
+CONTRACT_REF="63fc49c68e46c1915bdc07db29d68f3f76d4377e"
+CONTRACT_SHA256="968021a0f3027d1d69eee95c18184cf7d1d483de6c5904dd66c45a96c79e7034"
+ADR_INDEX_SHA256="18d9eb95158d089e49b02f1bd868021c9e33a2fc946851c4d2efe98ec37b3729"
+EXPECTED_RELEASE_SCOPE="@verjson"
+EXPECTED_RELEASE_NODE_VERSION="24"
+EXPECTED_RELEASE_PACKAGE_DIRS_JSON='["."]'
+EXPECTED_RELEASE_PACKAGE_DIRS_SHELL='.'
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 renderer="$root/scripts/render-next.sh"
 validation_workflow="$root/.github/workflows/changelog.yml"
-release_workflow="$root/.github/workflows/release.yml"
+generated_artifacts_workflow="$root/.github/workflows/generated-artifacts.yml"
+release_propose_workflow="$root/.github/workflows/release-propose.yml"
 
 fail() { echo "FAIL - $1" >&2; exit 1; }
 
@@ -59,17 +65,24 @@ if [ -n "${CHANGELOG_CONTRACT_PATH:-}" ]; then
   contract_is_pinned "$contract" \
     || contract_fail "CHANGELOG_CONTRACT_PATH ($contract) is not the contract pinned at $CONTRACT_REF"
 else
-  cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/verjson-changelog/$CONTRACT_REF"
+  # Stable runner/bootstrap contract: preload
+  #   $VERJSON_CHANGELOG_TOOL_CACHE/<commit>/changelog.py
+  # or leave the variable unset for the per-user cache. The commit selects the
+  # location; CONTRACT_SHA256 still decides whether those bytes may execute.
+  cache_root="${VERJSON_CHANGELOG_TOOL_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/verjson-changelog}"
+  cache_dir="$cache_root/$CONTRACT_REF"
   contract="$cache_dir/changelog.py"
   if ! contract_is_pinned "$contract"; then
-    mkdir -p "$cache_dir"
+    mkdir -p "$cache_dir" \
+      || contract_fail "cannot create changelog tool cache directory $cache_dir"
     # mktemp, not a fixed name: concurrent runs share this cache directory.
-    tmp="$(mktemp "$cache_dir/.changelog.XXXXXX")"
+    tmp="$(mktemp "$cache_dir/.changelog.XXXXXX")" \
+      || contract_fail "cannot create a temporary changelog contract in $cache_dir"
     if ! curl -fsSL \
       "https://raw.githubusercontent.com/Verjson/.github/$CONTRACT_REF/scripts/changelog.py" \
       -o "$tmp"; then
       rm -f "$tmp"
-      contract_fail "cannot fetch the changelog contract at $CONTRACT_REF"
+      contract_fail "cannot fetch the changelog contract at $CONTRACT_REF and no verified cache entry is available at $contract; preload SHA-256 $CONTRACT_SHA256 and set VERJSON_CHANGELOG_TOOL_CACHE=$cache_root"
     fi
     # Verify before publishing into the cache, so a bad fetch is never persisted
     # for the next run to trust.
@@ -77,7 +90,8 @@ else
       rm -f "$tmp"
       contract_fail "fetched contract does not match the digest pinned at $CONTRACT_REF"
     fi
-    mv "$tmp" "$contract"
+    mv "$tmp" "$contract" \
+      || contract_fail "cannot publish the verified changelog contract to $contract"
   fi
 fi
 
@@ -90,40 +104,507 @@ echo "ok - canonical validation accepts this repository"
 
 # One pin, shared by every generated artifact: local rendering must predict the
 # CI run that gates the PR, and the release must write the shape both assumed.
-grep -q "changelog-validate.yml@$CONTRACT_REF" "$validation_workflow" \
-  || fail "$validation_workflow does not call the validation workflow at the pin"
+if grep -q "changelog-validate.yml@$CONTRACT_REF" "$validation_workflow"; then
+  :
+elif grep -q "generated-artifacts.yml@$CONTRACT_REF" "$validation_workflow" \
+  && grep -qE '^ +changelog: true$' "$validation_workflow"; then
+  :
+else
+  fail "$validation_workflow does not call a supported changelog workflow at the pin"
+fi
 grep -q "contract_ref: $CONTRACT_REF" "$validation_workflow" \
   || fail "$validation_workflow does not pass the pinned contract_ref"
-grep -q "CONTRACT_REF=\"$CONTRACT_REF\"" "$renderer" \
-  || fail "$renderer does not pin the same contract commit"
-if [ -f "$release_workflow" ]; then
-  grep -q "changelog-release.yml@$CONTRACT_REF" "$release_workflow" \
-    || fail "$release_workflow does not call the release workflow at the pin"
-  # The release pushes its snapshot commit and tag straight to the default
-  # branch, which the standard Verjson `main-protection` ruleset forbids for
-  # every actor outside its bypass list. GITHUB_TOKEN is not on that list, so a
-  # caller wiring it is rejected by GH013 at the last step of the last job —
-  # past everything a pull request or a remote-less fixture can observe. Pass an
-  # admin-scoped secret instead (Verjson/.github ADR 0052).
-  #
-  # The value is isolated before matching rather than grepped for inline. A
-  # guard on the raw line misses every ordinary spelling of the same wiring —
-  # a quoted scalar, the `github.token` alias, the case-insensitive
-  # `secrets.github_token`, a folded value on the following line — and each
-  # miss reports green while reproducing the failure exactly. It also fires on
-  # a `# NOT GITHUB_TOKEN` comment sitting above a correct wiring, which is a
-  # comment this contract's own documentation recommends writing.
-  push_token_value="$(sed 's/#.*//' "$release_workflow" | awk '
-    /^[[:space:]]*push_token:/ { depth = match($0, /[^[:space:]]/); found = 1; print; next }
-    found && $0 ~ /^[[:space:]]*$/ { next }
-    found && match($0, /[^[:space:]]/) > depth { print; next }
-    found { found = 0 }
-  ')"
-  if printf '%s\n' "$push_token_value" \
-    | grep -qiE '\$\{\{[[:space:]]*(secrets\.GITHUB_TOKEN|github\.token)[[:space:]]*\}\}'; then
-    fail "$release_workflow passes GITHUB_TOKEN as push_token; the branch ruleset rejects that push. Pass an admin-scoped secret."
+validate_adr_generator() {
+  adr_generator="$root/scripts/gen-adr-index.sh"
+  [ -n "$ADR_INDEX_SHA256" ] \
+    || fail "adr-index: true has no canonical generator at $CONTRACT_REF"
+  [ -x "$adr_generator" ] \
+    || fail "adr-index: true requires the pinned scripts/gen-adr-index.sh. Acquire it with: scripts/gen-changelog-caller.sh adr-index-generator $CONTRACT_REF > scripts/gen-adr-index.sh && chmod +x scripts/gen-adr-index.sh"
+  [ "$(contract_digest_of "$adr_generator")" = "$ADR_INDEX_SHA256" ] \
+    || fail "$adr_generator is not the generator pinned at $CONTRACT_REF. Regenerate it with: scripts/gen-changelog-caller.sh adr-index-generator $CONTRACT_REF > scripts/gen-adr-index.sh"
+}
+if grep -qE '^ +adr-index: true$' "$validation_workflow"; then
+  validate_adr_generator
+fi
+if [ -e "$generated_artifacts_workflow" ]; then
+  [ "$(grep -Ec '^ +uses: Verjson/\.github/\.github/workflows/generated-artifacts\.yml@[0-9a-f]{40}$' "$generated_artifacts_workflow")" = 1 ] \
+    && grep -qE "^ +uses: Verjson/\\.github/\\.github/workflows/generated-artifacts\\.yml@$CONTRACT_REF$" "$generated_artifacts_workflow" \
+    || fail "$generated_artifacts_workflow does not call generated-artifacts.yml at the shared pin"
+  [ "$(grep -Ec '^ +contract_ref: [0-9a-f]{40}$' "$generated_artifacts_workflow")" = 1 ] \
+    && grep -qE "^ +contract_ref: $CONTRACT_REF$" "$generated_artifacts_workflow" \
+    || fail "$generated_artifacts_workflow does not pass the shared pinned contract_ref"
+  [ "$(grep -Ec '^ +adr-index: true$' "$generated_artifacts_workflow")" = 1 ] \
+    || fail "$generated_artifacts_workflow must enable ADR-index validation in the split caller topology"
+  validate_adr_generator
+fi
+if [ -e "$release_propose_workflow" ]; then
+  [ -f "$root/.github/workflows/release.yml" ] \
+    || fail "$release_propose_workflow requires the generated .github/workflows/release.yml dispatch target"
+  provenance="$(grep -E "^# Generated by Verjson/\.github scripts/gen-changelog-caller\.sh release-propose $CONTRACT_REF --autonomy (propose|dispatch)$" "$release_propose_workflow" || true)"
+  [ "$(printf '%s\n' "$provenance" | grep -c .)" -eq 1 ] \
+    || fail "$release_propose_workflow is not the generated release-propose caller at $CONTRACT_REF"
+  autonomy="${provenance##*--autonomy }"
+  [ "$(grep -Ec '^ +uses: Verjson/\.github/\.github/workflows/release-propose\.yml@[0-9a-f]{40}$' "$release_propose_workflow")" -eq 1 ] \
+    && grep -qE "^ +uses: Verjson/\.github/\.github/workflows/release-propose\.yml@$CONTRACT_REF$" "$release_propose_workflow" \
+    || fail "$release_propose_workflow does not call release-propose.yml at the shared pin"
+  [ "$(grep -Ec '^ +contract_ref: [0-9a-f]{40}$' "$release_propose_workflow")" -eq 1 ] \
+    && grep -qE "^ +contract_ref: $CONTRACT_REF$" "$release_propose_workflow" \
+    || fail "$release_propose_workflow does not pass the shared pinned contract_ref"
+  [ "$(grep -Ec '^ +autonomy: (propose|dispatch)$' "$release_propose_workflow")" -eq 1 ] \
+    && grep -qE "^ +autonomy: $autonomy$" "$release_propose_workflow" \
+    || fail "$release_propose_workflow does not fix the generated autonomy in source"
+  grep -qE '^  schedule:$' "$release_propose_workflow" \
+    && grep -qE '^  workflow_dispatch:$' "$release_propose_workflow" \
+    && ! grep -qE '^  (push|pull_request|pull_request_target):' "$release_propose_workflow" \
+    || fail "$release_propose_workflow must be schedule/operator triggered, never release-on-merge"
+  proposer_job="$(awk '
+    /^  release-propose:[[:space:]]*$/ { capture = 1 }
+    capture && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ && $0 !~ /^  release-propose:/ { exit }
+    capture { print }
+  ' "$release_propose_workflow")"
+  grep -qE '^ +contents: read$' <<<"$proposer_job" \
+    || fail "$release_propose_workflow proposer job lacks contents-read"
+  if [ "$autonomy" = propose ]; then
+    grep -qE '^ +issues: write$' <<<"$proposer_job" \
+      && ! grep -qE '^ +actions: write$' <<<"$proposer_job" \
+      || fail "$release_propose_workflow propose mode must grant issues-write and not actions-write"
+  else
+    grep -qE '^ +actions: write$' <<<"$proposer_job" \
+      && ! grep -qE '^ +issues: write$' <<<"$proposer_job" \
+      || fail "$release_propose_workflow dispatch mode must grant actions-write and not issues-write"
   fi
 fi
+grep -q "CONTRACT_REF=\"$CONTRACT_REF\"" "$renderer" \
+  || fail "$renderer does not pin the same contract commit"
+cat >"$work/release-shape.py" <<'RELEASE_SHAPE_PY'
+"""Structural checks on a release caller, on a bare python3.
+
+Only two properties live here, both of which a line-oriented grep gets wrong in
+ways that report green:
+
+  * the trigger set must be EXACTLY {workflow_dispatch}. A blocklist accepts
+    every trigger nobody listed, and an anchor on a bare `on:` line never sees
+    the flow spelling `on: {workflow_dispatch: {...}, push: {...}}`.
+  * a GITHUB_TOKEN bound to NODE_AUTH_TOKEN is legitimate only inside the step
+    that runs `npm publish`. Checking the install step alone misses the same
+    credential inherited from a job-level or workflow-level `env:`.
+
+Anything this parser cannot read confidently is an error, never a pass.
+"""
+import re
+import sys
+
+path = sys.argv[1]
+problems = []
+
+with open(path, encoding="utf-8") as handle:
+    raw_lines = handle.read().splitlines()
+
+
+def strip_comment(line):
+    """Drop a trailing comment without touching a `#` inside a quoted scalar."""
+    out = []
+    quote = None
+    for index, char in enumerate(line):
+        if quote:
+            out.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+            out.append(char)
+            continue
+        if char == "#" and (index == 0 or line[index - 1] in " \t"):
+            break
+        out.append(char)
+    return "".join(out).rstrip()
+
+
+lines = [strip_comment(line) for line in raw_lines]
+
+
+def split_top_level(text):
+    """Split a flow collection body on commas that are not nested or quoted."""
+    parts = []
+    current = []
+    depth = 0
+    quote = None
+    for char in text:
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+            current.append(char)
+            continue
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    if "".join(current).strip():
+        parts.append("".join(current))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def keys_of_flow(text):
+    text = text.strip()
+    if text.startswith("{") and text.endswith("}"):
+        return [
+            part.split(":", 1)[0].strip().strip("'\"")
+            for part in split_top_level(text[1:-1])
+        ]
+    if text.startswith("[") and text.endswith("]"):
+        return [part.strip().strip("'\"") for part in split_top_level(text[1:-1])]
+    return [text.strip("'\"")]
+
+
+TRIGGER_KEY = re.compile(r"""^(?:on|'on'|"on"|true|True)\s*:(.*)$""")
+
+
+def trigger_names():
+    for index, line in enumerate(lines):
+        match = TRIGGER_KEY.match(line)
+        if not match:
+            continue
+        inline = match.group(1).strip()
+        if inline:
+            return keys_of_flow(inline)
+        block = []
+        for following in lines[index + 1:]:
+            if not following.strip():
+                continue
+            if not following[:1].isspace():
+                break
+            block.append(following)
+        if not block:
+            return None
+        indent = min(len(line) - len(line.lstrip()) for line in block)
+        names = []
+        for entry in block:
+            if len(entry) - len(entry.lstrip()) != indent:
+                continue
+            text = entry.strip()
+            if text.startswith("- "):
+                text = text[2:].strip()
+            elif text == "-":
+                continue
+            name = text.split(":", 1)[0].strip().strip("'\"")
+            if name:
+                names.append(name)
+        return names or None
+    return None
+
+
+triggers = trigger_names()
+if triggers is None:
+    problems.append(
+        "declares no readable top-level `on:` trigger. A release states the "
+        "version it cuts, so it must be a workflow_dispatch and nothing else "
+        "(ADR 0038, ADR 0060)"
+    )
+elif set(triggers) != {"workflow_dispatch"}:
+    problems.append(
+        "is triggered by %s. A release is dispatched with the version it cuts, "
+        "never derived from repository activity, and never exposed as a "
+        "reusable workflow another caller can fire (ADR 0038, ADR 0060)"
+        % ", ".join(sorted(set(triggers)) or ["nothing"])
+    )
+
+GITHUB_TOKEN = re.compile(
+    r"\$\{\{\s*(secrets\.GITHUB_TOKEN|github\.token)\s*\}\}", re.IGNORECASE
+)
+PRIVATE_NODE_TOKEN = re.compile(
+    r"\$\{\{\s*secrets\.NODE_AUTH_TOKEN\s*\}\}", re.IGNORECASE
+)
+LIST_ITEM = re.compile(r"^(\s*)-\s")
+
+
+def enclosing_step(index):
+    """The list-item block containing `index`, or None if it is not in one."""
+    cursor = index
+    while cursor >= 0:
+        match = LIST_ITEM.match(lines[cursor])
+        if match:
+            indent = len(match.group(1))
+            end = cursor + 1
+            while end < len(lines):
+                current = lines[end]
+                if current.strip() and len(current) - len(current.lstrip()) <= indent:
+                    break
+                end += 1
+            if cursor <= index < end:
+                return lines[cursor:end]
+            return None
+        cursor -= 1
+    return None
+
+
+for index, line in enumerate(lines):
+    if "NODE_AUTH_TOKEN" not in line or not GITHUB_TOKEN.search(line):
+        continue
+    step = enclosing_step(index)
+    if step is None or not any("npm publish" in entry for entry in step):
+        problems.append(
+            "binds NODE_AUTH_TOKEN to GITHUB_TOKEN at line %d, outside the "
+            "`npm publish` step. A repository-scoped GITHUB_TOKEN cannot read a "
+            "private @verjson package owned by another repository, so the "
+            "install 401s after the tag has already been pushed. Install with "
+            "NODE_AUTH_TOKEN and keep GITHUB_TOKEN for npm publish (#465)"
+            % (index + 1)
+        )
+
+verification_steps = [
+    index for index, line in enumerate(lines)
+    if line.strip() == "- name: Run the release verification suite"
+]
+if len(verification_steps) != 1:
+    problems.append(
+        "must contain exactly one named release verification suite step (#569)"
+    )
+else:
+    verification_step = enclosing_step(verification_steps[0])
+    if verification_step is None or not any(
+        "NODE_AUTH_TOKEN" in entry and PRIVATE_NODE_TOKEN.search(entry)
+        for entry in verification_step
+    ):
+        problems.append(
+            "does not expose secrets.NODE_AUTH_TOKEN to the release verification "
+            "hook/default suite step (#569)"
+        )
+
+for index, line in enumerate(lines):
+    if "NODE_AUTH_TOKEN" not in line or not PRIVATE_NODE_TOKEN.search(line):
+        continue
+    step = enclosing_step(index)
+    if step is None:
+        indent = len(line) - len(line.lstrip())
+        parent = next(
+            (
+                entry.strip()
+                for entry in reversed(lines[:index])
+                if entry.strip()
+                and len(entry) - len(entry.lstrip()) < indent
+            ),
+            "",
+        )
+        if parent == "secrets:":
+            continue
+        problems.append(
+            "exposes secrets.NODE_AUTH_TOKEN outside a step-scoped environment (#569)"
+        )
+        continue
+    is_install = any(re.search(r"\bnpm ci\b", entry) for entry in step)
+    is_verification = any(
+        entry.strip() == "- name: Run the release verification suite"
+        for entry in step
+    )
+    if not (is_install or is_verification):
+        problems.append(
+            "exposes secrets.NODE_AUTH_TOKEN to an unrelated release step (#569)"
+        )
+for problem in problems:
+    sys.stderr.write("FAIL - %s %s\n" % (path, problem))
+sys.exit(1 if problems else 0)
+RELEASE_SHAPE_PY
+
+# Every workflow that calls changelog-release.yml is a release caller, whatever
+# it happens to be named. Keying these checks on one filename let a caller named
+# anything else — publish.yml, release-package.yml, a second caller kept beside
+# the first — collect zero checks and report green, which is the failure mode
+# this whole file exists to remove.
+release_workflows=""
+for candidate in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml; do
+  [ -f "$candidate" ] || continue
+  if grep -q 'changelog-release\.yml@' "$candidate"; then
+    release_workflows="$release_workflows$candidate
+"
+  fi
+done
+
+while IFS= read -r release_workflow; do
+  [ -n "$release_workflow" ] || continue
+  grep -q "changelog-release.yml@$CONTRACT_REF" "$release_workflow" \
+    || fail "$release_workflow does not call the release workflow at the pin"
+  # The release caller was the last adopter file still hand-copied from a
+  # sibling, so one ordering bug propagated to every migrated repository at once
+  # (#463, #464, #465). Provenance is asserted first because it is the only check
+  # that also catches the defects nobody has named yet.
+  grep -q "gen-changelog-caller.sh release-node $CONTRACT_REF" "$release_workflow" \
+    || fail "$release_workflow is not the generated release caller at $CONTRACT_REF. Regenerate it: scripts/gen-changelog-caller.sh release-node $CONTRACT_REF > .github/workflows/release.yml"
+  grep -qF "run-name: Release \${{ inputs.version }} \${{ inputs.selector_digest || 'manual' }}" "$release_workflow" \
+    || fail "$release_workflow lacks the exact-version run title required for idempotent dispatch"
+
+  # Comments stripped before structural matching so a migration note naming a
+  # retired token does not read as live credential wiring.
+  sed 's/#.*//' "$release_workflow" >"$work/release-stripped.yml"
+
+  # Renovate's GitHub Actions manager does not implement `# renovate: ignore`
+  # for setup-node's uses-with fields. A literal expression remains the same
+  # runtime string but is intentionally dynamic to Renovate (#700).
+  printf -v expected_node_version "node-version: \${{ '%s' }}" "$EXPECTED_RELEASE_NODE_VERSION"
+  [ "$(awk -v expected="$expected_node_version" '
+      { line = $0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line) }
+      line == expected { count++ }
+      END { print count + 0 }
+    ' "$work/release-stripped.yml")" -eq 2 ] \
+    || fail "$release_workflow does not use Node $EXPECTED_RELEASE_NODE_VERSION in both release jobs; regenerate release-node and contract-test with the same --node-version (#520)"
+  [ "$(awk -v expected="scope: '$EXPECTED_RELEASE_SCOPE'" '
+      { line = $0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line) }
+      line == expected { count++ }
+      END { print count + 0 }
+    ' "$work/release-stripped.yml")" -eq 2 ] \
+    || fail "$release_workflow does not use npm scope $EXPECTED_RELEASE_SCOPE in both release jobs; regenerate release-node and contract-test with the same --scope (#520)"
+
+  # The job that calls changelog-release.yml, isolated as a block rather than
+  # grepped for. `needs:` and `runner:` are ordinary keys that also appear under
+  # other jobs, so a guard matching them anywhere in the file passes on exactly
+  # the shape it exists to reject.
+  snapshot_job="$(awk '
+    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+    !in_jobs { next }
+    /^[^[:space:]]/ { in_jobs = 0; next }
+    /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ {
+      if (block ~ /changelog-release\.yml@/) { printf "%s", block; done = 1; exit }
+      block = ""
+    }
+    { block = block $0 "\n" }
+    END { if (!done && block ~ /changelog-release\.yml@/) printf "%s", block }
+  ' "$release_workflow")"
+
+  grep -qE '^[[:space:]]+release_app_client_id:[[:space:]]*\$\{\{[[:space:]]*vars\.RELEASE_APP_CLIENT_ID[[:space:]]*\}\}[[:space:]]*$' \
+    <<<"$snapshot_job" \
+    || fail "$release_workflow does not pass the organization RELEASE_APP_CLIENT_ID variable to the release workflow"
+  grep -qE '^[[:space:]]+release_app_private_key:[[:space:]]*\$\{\{[[:space:]]*secrets\.RELEASE_APP_PRIVATE_KEY[[:space:]]*\}\}[[:space:]]*$' \
+    <<<"$snapshot_job" \
+    || fail "$release_workflow does not pass only RELEASE_APP_PRIVATE_KEY to the release workflow"
+  ! sed 's/#.*//' <<<"$snapshot_job" \
+    | grep -qE 'ORG_ADMIN_TOKEN|push_token|secrets\.(GITHUB_TOKEN|github_token)|github\.token' \
+    || fail "$release_workflow snapshot still passes a broad or repository Actions push token instead of the dedicated release App credential"
+  snapshot_permissions="$(awk '
+    /^    permissions:[[:space:]]*$/ { in_permissions = 1; next }
+    in_permissions && /^    [^[:space:]]/ { exit }
+    in_permissions { print }
+  ' <<<"$snapshot_job")"
+  snapshot_permissions_effective="$(sed 's/#.*//' <<<"$snapshot_permissions" | sed '/^[[:space:]]*$/d')"
+  [ "$(grep -c . <<<"$snapshot_permissions_effective")" -eq 1 ] \
+    && grep -qE '^[[:space:]]+contents:[[:space:]]+read[[:space:]]*$' <<<"$snapshot_permissions_effective" \
+    || fail "$release_workflow snapshot grants GITHUB_TOKEN more than contents-read; only the dedicated release App token may push (#784)"
+
+  # The reusable workflow and its engine are one contract. Checking only the
+  # uses: ref lets a caller execute workflow A with contract_ref B (#349).
+  grep -qE "^[[:space:]]+contract_ref:[[:space:]]*$CONTRACT_REF[[:space:]]*$" \
+    <<<"$snapshot_job" \
+    || fail "$release_workflow passes a contract_ref that differs from its changelog-release.yml pin"
+
+  # #463/#464. changelog-release.yml consumes NEXT/, writes an immutable
+  # CHANGELOG/<version>.md, commits, tags and pushes to the default branch in one
+  # atomic push. Nothing after that is recoverable by re-dispatch: the same
+  # version is refused because the tag exists, a higher one because NEXT/ was
+  # already consumed. So the snapshot may never be the first job to run.
+  grep -qE '^[[:space:]]+needs:[[:space:]]*[^[:space:]]' <<<"$snapshot_job" \
+    || fail "$release_workflow runs the irreversible snapshot with no needs:, so a red tree is discovered only after the tag has been pushed (#463, #464)"
+
+  # #465. Omitting the optional runner input lets changelog-release.yml route the
+  # snapshot by its own default while the caller's jobs route by another. On a
+  # private repository the snapshot half — the half that mutates protected main —
+  # then queues on hosted runners with no check run and no error.
+  grep -qE '^[[:space:]]+runner:[[:space:]]*[^[:space:]]' <<<"$snapshot_job" \
+    || fail "$release_workflow passes no explicit runner:, so the snapshot and the publish half can land on different runner pools (#465)"
+
+  # #519. Verification must see the version selected by workflow_dispatch. The
+  # stamp is deliberately uncommitted: verify applies it to the dispatch tree,
+  # while the immutable node-release reusable workflow reapplies it to the tag
+  # before its build. The reusable workflow owns publication and restart safety;
+  # duplicating either concern into every generated caller recreates #455.
+  verify_job="$(awk '
+    /^  verify:[[:space:]]*$/ { in_job = 1 }
+    in_job && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ && $0 !~ /^  verify:/ { exit }
+    in_job { print }
+  ' "$release_workflow")"
+  publish_job="$(awk '
+    /^  publish:[[:space:]]*$/ { in_job = 1 }
+    in_job && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ && $0 !~ /^  publish:/ { exit }
+    in_job { print }
+  ' "$release_workflow")"
+  stamp_before() {
+    local job="$1" consumer_pattern="$2" stamp_line consumer_line
+    stamp_line="$(grep -n -m1 \
+      'npm version .*--no-git-tag-version --ignore-scripts --allow-same-version' \
+      <<<"$job" | cut -d: -f1)"
+    consumer_line="$(grep -n -m1 -E "$consumer_pattern" <<<"$job" | cut -d: -f1)"
+    [ -n "$stamp_line" ] && [ -n "$consumer_line" ] && [ "$stamp_line" -lt "$consumer_line" ]
+  }
+  stamp_before "$verify_job" 'scripts/release-verify\.sh|npm run build|npm run typecheck|npm run lint|npm test' \
+    || fail "$release_workflow does not stamp the dispatched package version before the verification build or suite (#519)"
+  grep -qF "package_dirs=($EXPECTED_RELEASE_PACKAGE_DIRS_SHELL)" <<<"$verify_job" \
+    || fail "$release_workflow does not stamp every package directory selected for publication (#557)"
+  prepare_line="$(grep -n -m1 'scripts/release-prepare-packages\.sh "\$PACKAGE_VERSION"' \
+    <<<"$verify_job" | cut -d: -f1)"
+  stamp_line="$(grep -n -m1 \
+    'npm version .*--no-git-tag-version --ignore-scripts --allow-same-version' \
+    <<<"$verify_job" | cut -d: -f1)"
+  [ -n "$prepare_line" ] && [ -n "$stamp_line" ] && [ "$prepare_line" -lt "$stamp_line" ] \
+    || fail "$release_workflow does not prepare package metadata before stamping and verifying the release tree (#550)"
+  grep -qF "uses: Verjson/.github/.github/workflows/node-release.yml@$CONTRACT_REF" \
+    <<<"$publish_job" \
+    || fail "$release_workflow does not delegate publication to node-release.yml at the immutable contract pin (#455)"
+  grep -qF 'needs: [verify, snapshot]' <<<"$publish_job" \
+    || fail "$release_workflow does not gate publication on both verification and snapshot state"
+  grep -qF "if: always() && needs.verify.result == 'success' && (needs.snapshot.result == 'success' || needs.snapshot.result == 'skipped')" \
+    <<<"$publish_job" \
+    || fail "$release_workflow cannot safely resume publication after reusing an immutable snapshot"
+  grep -qF "if: needs.verify.outputs.snapshot-exists != 'true'" <<<"$snapshot_job" \
+    || fail "$release_workflow recreates an existing immutable snapshot instead of resuming publication"
+  grep -qF 'snapshot-exists: ${{ steps.release-state.outputs.snapshot-exists }}' \
+    <<<"$verify_job" \
+    || fail "$release_workflow does not propagate verified snapshot state"
+  grep -qF 'echo "VERJSON_CHANGELOG_TOOL_CACHE=$RUNNER_TEMP/verjson-changelog-tools" >> "$GITHUB_ENV"' \
+    <<<"$verify_job" \
+    || fail "$release_workflow does not give repository verification hooks a job-writable changelog cache beneath runner.temp (#630)"
+  first_verify_step="$(awk '/^[[:space:]]+- name:/ { print; exit }' <<<"$verify_job")"
+  grep -qF -- '- name: Prepare job-scoped changelog tool cache' <<<"$first_verify_step" \
+    || fail "$release_workflow does not prepare the writable changelog cache before repository verification steps (#630)"
+  grep -qF "if: steps.release-state.outputs.snapshot-exists == 'true'" <<<"$verify_job" \
+    || fail "$release_workflow does not condition resumed verification on an existing snapshot"
+  grep -qF 'ref: ${{ inputs.version }}' <<<"$verify_job" \
+    || fail "$release_workflow verifies the later dispatch tree instead of the existing tagged snapshot"
+  for publish_input in \
+    'version: ${{ inputs.version }}' \
+    'prefix: ${{ inputs.prefix }}' \
+    "$expected_node_version" \
+    "scope: '$EXPECTED_RELEASE_SCOPE'" \
+    "package-dirs: '$EXPECTED_RELEASE_PACKAGE_DIRS_JSON'" \
+    'runner: ${{'; do
+    grep -qF "$publish_input" <<<"$publish_job" \
+      || fail "$release_workflow does not pass '$publish_input' to node-release.yml"
+  done
+  grep -qF 'NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}' <<<"$publish_job" \
+    || fail "$release_workflow does not pass the private-dependency token to node-release.yml"
+
+  # The trigger surface and the install credential are checked structurally,
+  # because both were shipped here as line-oriented greps first and both were
+  # trivially evadable: an `on:` blocklist accepts every trigger nobody thought
+  # to list (`workflow_call`, `release`, `workflow_run`), and a `^on:$` anchor
+  # never sees `on: {workflow_dispatch: ..., push: ...}` written in flow style.
+  # The rules below are allowlists over a parsed trigger set, and the parser
+  # refuses anything it cannot read rather than passing it.
+  #
+  # PyYAML is deliberately not used: the canonical contract runs on a bare
+  # python3 with no third-party dependency, and a "use it if importable"
+  # fallback would put every adopter without it on the untested path.
+  python3 "$work/release-shape.py" "$release_workflow" \
+    || fail "$release_workflow: see above"
+done <<RELEASE_WORKFLOWS
+$release_workflows
+RELEASE_WORKFLOWS
 echo "ok - render, validation and release automation share one immutable pin"
 
 # The regression this file exists to prevent was a hand-written local renderer
@@ -142,6 +623,17 @@ echo "ok - contract scripts are executable"
 # exactly the state a release leaves behind. The final fixture proves this guard
 # is still load-bearing rather than dead code.
 #
+# The tolerated cause is decided from the TREE, not from the exit status (#399,
+# duplicate #419). Keyed on the status alone, every renderer failure reported
+# `ok - no unreleased fragments to render`: an unreachable contract fetch, a
+# digest mismatch, a malformed fragment, a missing python3, the #398 argv
+# ceiling. Each of those is a broken adopter announcing a clean release, and
+# `2>/dev/null` threw away the only sentence that said which.
+#
+# So: an emptied NEXT/ is the one state that excuses a non-zero exit, and it is
+# observable directly. A failure with fragments still present is a failure, and
+# the captured stderr is printed rather than discarded.
+#
 # The rendered log travels through a file, never through a variable handed to
 # execve. A single argv or environment string is capped at MAX_ARG_STRLEN — a
 # fixed 128 KiB, unrelated to the far larger ARG_MAX that a check would read —
@@ -150,7 +642,42 @@ echo "ok - contract scripts are executable"
 # fragment count (#398). NEXT/ is per-change and never batched, so it grows past
 # 128 KiB in the ordinary course of a busy release cycle; releasing consumes it,
 # but the release path runs this suite, so the failure gated its own remedy.
-if "$renderer" >"$work/rendered" 2>/dev/null; then
+render_rc=0
+"$renderer" >"$work/rendered" 2>"$work/render-err" || render_rc=$?
+# README.md and 0000-archive.md are excluded by name here for the same reason the
+# python block skips them: neither is a renderable fragment, so a NEXT/ holding
+# only those is "emptied" as far as the renderer is concerned.
+renderable_left="$(python3 - "$root/NEXT" <<'PY'
+import sys
+from pathlib import Path
+
+count = 0
+for path in Path(sys.argv[1]).glob("*.md"):
+    if path.name in {"README.md", "0000-archive.md"}:
+        continue
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "---":
+        count += 1
+        continue
+    try:
+        end = lines.index("---", 1)
+    except ValueError:
+        count += 1
+        continue
+    if not any(line.partition(":")[0].strip() == "component" for line in lines[1:end]):
+        count += 1
+print(count)
+PY
+)"
+if [ "$render_rc" -ne 0 ] && [ "${renderable_left:-0}" -gt 0 ]; then
+  echo "the renderer exited $render_rc with $renderable_left unreleased fragment(s) still in NEXT/." >&2
+  echo "This is not the post-release empty-NEXT/ case; the renderer itself is broken." >&2
+  echo "--- renderer stderr ---" >&2
+  cat "$work/render-err" >&2 || true
+  echo "--- end renderer stderr ---" >&2
+  fail "render-next failed for a reason other than an emptied NEXT/"
+fi
+if [ "$render_rc" -eq 0 ]; then
   ROOT="$root" RENDERED_PATH="$work/rendered" python3 - <<'PY'
 import os
 import re
@@ -162,6 +689,14 @@ rendered = Path(os.environ["RENDERED_PATH"]).read_text(encoding="utf-8")
 # 0000-archive.md is special-cased by name and is not rendered in strict mode.
 skip = {"README.md", "0000-archive.md"}
 fragments = sorted(p for p in (root / "NEXT").glob("*.md") if p.name not in skip)
+fragments = [
+    path
+    for path in fragments
+    if not any(
+        line.partition(":")[0].strip() == "component"
+        for line in path.read_text(encoding="utf-8").split("---", 2)[1].splitlines()
+    )
+]
 if not fragments:
     sys.exit("NEXT/ holds no renderable fragments but the renderer produced output")
 
@@ -208,8 +743,25 @@ for path in fragments:
     # Identity is not decoration: only issue-form entries render a `#n`
     # back-link, so a fragment demoted to `id` silently loses release linkage
     # and no validation error is raised.
+    #
+    # The trailing group is the `; refs #a, #b` an entry renders when it links
+    # issues it does not own (#316). Anchoring `_$` straight after the back-link
+    # rejected that combination even though validation accepts it and the engine
+    # renders it — and the test is generated, so the adopter had no legal way out
+    # (#461). It stays a spelled-out shape rather than `.*`, because the anchor is
+    # what makes a truncated or embellished back-link fail — and the group is
+    # required, not optional, once the fragment declares `refs`, so a linkage the
+    # render drops is caught by the same assertion that the missing back-link is.
+    # Whether the numbers are the declared ones is the engine's business; this
+    # file checks the shape it emits, never re-derives the input.
     if "issue" in meta:
-        pattern = rf"^_Date: {re.escape(meta['date'])}; issue #{re.escape(meta['issue'])}_$"
+        refs_group = r"(?:; refs #\d+(?:, #\d+)*)"
+        if not meta.get("refs", "").strip():
+            refs_group += "?"
+        pattern = (
+            rf"^_Date: {re.escape(meta['date'])}; issue #{re.escape(meta['issue'])}"
+            rf"{refs_group}_$"
+        )
         if not re.search(pattern, rendered, re.MULTILINE):
             sys.exit(f"{path.name}: issue back-link missing from the rendered log")
 
@@ -258,16 +810,18 @@ new_fixture() {
 }
 
 write_fragment() {
-  # write_fragment <relative-path> <date> <identity-line> <title>
-  cat >"$fixture_root/case/$1" <<FRAGMENT
----
-date: $2
-$3
-title: $4
----
-
-Body.
-FRAGMENT
+  # write_fragment <relative-path> <date> <identity-line> <title> [impact]
+  local impact="${5:-}"
+  {
+    echo "---"
+    echo "date: $2"
+    echo "$3"
+    [ -z "$impact" ] || echo "impact: $impact"
+    echo "title: $4"
+    echo "---"
+    echo
+    echo "Body."
+  } >"$fixture_root/case/$1"
 }
 
 init_fixture_repo() {
@@ -322,6 +876,73 @@ write_fragment NEXT/2026-08-01-issue-20260801T184500Z-timestamped.md \
 python3 "$contract" validate --repo-root "$fixture_root/case"
 echo "ok - issue-less work may use a UTC timestamp identity"
 
+# New fragments must state release intent at review time. Existing unreleased
+# fragments keep their patch fallback, so adopting this contract never rewrites
+# an old NEXT/ entry or an immutable CHANGELOG/ snapshot (#800).
+new_fixture
+init_fixture_repo
+printf 'base\n' >"$fixture_root/case/README.md"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm base
+base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+write_fragment NEXT/2026-08-15-issue-800-missing-impact.md \
+  2026-08-15 "issue: 800" "Missing impact"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm "new fragment without impact"
+if python3 "$contract" validate --repo-root "$fixture_root/case" \
+  --base "$base" --head HEAD 2>"$fixture_root/error"; then
+  fail "a new fragment without explicit impact was accepted"
+fi
+grep -q 'impact is required.*major, minor, or patch' "$fixture_root/error"
+python3 "$contract" validate --repo-root "$fixture_root/case" \
+  --base "$base" --head HEAD --allow-missing-impact-through 9999-12-31
+echo "ok - new fragments require explicit impact after the bounded migration window"
+
+new_fixture
+init_fixture_repo
+write_fragment NEXT/2026-08-01-issue-43-legacy-impact.md \
+  2026-08-01 "issue: 43" "Legacy implicit patch"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm base
+base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+write_fragment NEXT/2026-08-15-issue-800-explicit-impact.md \
+  2026-08-15 "issue: 800" "Explicit impact" minor
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm "new fragment with impact"
+python3 "$contract" validate --repo-root "$fixture_root/case" \
+  --base "$base" --head HEAD
+echo "ok - legacy implicit-patch fragments remain valid while new fragments declare impact"
+
+new_fixture
+init_fixture_repo
+write_fragment NEXT/2026-08-01-issue-43-legacy-rename.md \
+  2026-08-01 "issue: 43" "Renamed identity"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm base
+base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+mv "$fixture_root/case/NEXT/2026-08-01-issue-43-legacy-rename.md" \
+  "$fixture_root/case/NEXT/2026-08-01-issue-800-renamed-identity.md"
+python3 - "$fixture_root/case/NEXT/2026-08-01-issue-800-renamed-identity.md" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+path.write_text(
+    path.read_text(encoding="utf-8").replace("issue: 43", "issue: 800"),
+    encoding="utf-8",
+)
+PY
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm "rename to a different identity"
+git -C "$fixture_root/case" diff --find-renames --name-status "$base...HEAD" \
+  | grep -q '^R' || fail "identity-change fixture was not classified as a rename"
+if python3 "$contract" validate --repo-root "$fixture_root/case" \
+  --base "$base" --head HEAD 2>"$fixture_root/error"; then
+  fail "a NEXT rename to a different identity bypassed explicit impact"
+fi
+grep -q 'impact is required.*major, minor, or patch' "$fixture_root/error"
+echo "ok - NEXT renames to a different identity require explicit impact"
+
 # ADR 0017's check-pr rule, both halves: an ordinary pull request may neither
 # write released history nor consume a fragment.
 new_fixture
@@ -356,6 +977,89 @@ fi
 grep -q 'NEXT' "$fixture_root/error"
 echo "ok - pull requests cannot consume NEXT/ fragments"
 
+# Dependency-only bot updates are still observable changes. The policy is keyed
+# exclusively to the changed-file boundary, not actor identity, so Renovate and
+# human-authored updates receive the same requirement.
+for dependency_path in \
+  package.json apps/api/package-lock.json pnpm-lock.yaml web/yarn.lock \
+  pyproject.toml requirements.txt requirements-dev.txt poetry.lock Pipfile \
+  Pipfile.lock uv.lock services/worker/go.mod services/worker/go.sum \
+  crates/core/Cargo.toml Cargo.lock infra/.terraform.lock.hcl; do
+  new_fixture
+  init_fixture_repo
+  printf 'base\n' >"$fixture_root/case/README.md"
+  git -C "$fixture_root/case" add .
+  git -C "$fixture_root/case" commit -qm base
+  base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+  mkdir -p "$(dirname "$fixture_root/case/$dependency_path")"
+  printf 'dependency update\n' >"$fixture_root/case/$dependency_path"
+  git -C "$fixture_root/case" add .
+  git -C "$fixture_root/case" commit -qm "renovate dependency update"
+  if python3 "$contract" check-pr --repo-root "$fixture_root/case" \
+    --base "$base" --head HEAD 2>"$fixture_root/error"; then
+    fail "dependency change without a fragment was accepted: $dependency_path"
+  fi
+  grep -q 'dependency manifests or lockfiles require a new NEXT fragment' \
+    "$fixture_root/error"
+done
+echo "ok - dependency manifests and lockfiles require a new fragment for every actor (#524)"
+
+new_fixture
+init_fixture_repo
+printf '{"version":"1.0.0"}\n' >"$fixture_root/case/package.json"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm base
+base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+printf '{"version":"1.0.1"}\n' >"$fixture_root/case/package.json"
+write_fragment NEXT/2026-08-01-issue-524-dependency.md \
+  2026-08-01 "issue: 524" "Dependency update"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm "dependency update with fragment"
+python3 "$contract" check-pr --repo-root "$fixture_root/case" --base "$base" --head HEAD
+echo "ok - a dependency change with a new valid fragment is accepted"
+
+new_fixture
+init_fixture_repo
+printf '{"version":"1.0.0"}\n' >"$fixture_root/case/package.json"
+write_fragment NEXT/2026-08-01-issue-524-existing.md \
+  2026-08-01 "issue: 524" "Existing entry"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm base
+base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+printf '{"version":"1.0.1"}\n' >"$fixture_root/case/package.json"
+printf '\nMore.\n' >>"$fixture_root/case/NEXT/2026-08-01-issue-524-existing.md"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm "dependency update reusing fragment"
+if python3 "$contract" check-pr --repo-root "$fixture_root/case" \
+  --base "$base" --head HEAD 2>"$fixture_root/error"; then
+  fail "dependency change reused an existing fragment"
+fi
+grep -q 'new NEXT fragment' "$fixture_root/error"
+echo "ok - dependency updates cannot reuse an unrelated existing fragment"
+
+new_fixture
+init_fixture_repo
+printf 'base\n' >"$fixture_root/case/README.md"
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm base
+base="$(git -C "$fixture_root/case" rev-parse HEAD)"
+for unrelated in package.json.md package-lock.yaml requirements.md \
+  Cargo.lock.backup terraform.lock.hcl docs/go.mod.md; do
+  mkdir -p "$(dirname "$fixture_root/case/$unrelated")"
+  printf 'not a dependency boundary\n' >"$fixture_root/case/$unrelated"
+done
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm "similarly named files"
+python3 "$contract" check-pr --repo-root "$fixture_root/case" --base "$base" --head HEAD
+echo "ok - similarly named non-dependency files do not trigger the fragment rule"
+
+if python3 "$contract" check-pr --repo-root "$fixture_root/case" \
+  --base malformed-api-sha --head HEAD 2>"$fixture_root/error"; then
+  fail "malformed pull-request revision input was accepted"
+fi
+grep -q 'malformed-api-sha' "$fixture_root/error"
+echo "ok - malformed pull-request revision input fails closed"
+
 new_fixture
 init_fixture_repo
 mkdir -p "$fixture_root/case/CHANGELOG"
@@ -371,6 +1075,36 @@ grep -q 'already exists' "$fixture_root/error"
 [ "$(cat "$fixture_root/case/CHANGELOG/v1.0.0.md")" = 'immutable' ] \
   || fail "a rejected release still mutated the snapshot"
 echo "ok - released snapshots cannot be overwritten"
+
+new_fixture
+init_fixture_repo
+mkdir -p "$fixture_root/case/CHANGELOG"
+printf 'baseline\n' >"$fixture_root/case/CHANGELOG/v1.0.0.md"
+write_fragment NEXT/2026-08-01-issue-43-impact.md \
+  2026-08-01 "issue: 43" "Minor release" minor
+git -C "$fixture_root/case" add .
+git -C "$fixture_root/case" commit -qm initial
+before="$(git -C "$fixture_root/case" status --porcelain)"
+next_version="$(python3 "$contract" next-version --repo-root "$fixture_root/case")"
+[ "$next_version" = v1.1.0 ] \
+  || fail "next-version derived '$next_version' instead of v1.1.0"
+[ "$(git -C "$fixture_root/case" status --porcelain)" = "$before" ] \
+  || fail "next-version mutated the release tree"
+if python3 "$contract" release --repo-root "$fixture_root/case" --version v1.0.1 \
+  2>"$fixture_root/error"; then
+  fail "a release smaller than the selected impact was accepted"
+fi
+grep -q 'require a minor bump' "$fixture_root/error"
+[ "$(git -C "$fixture_root/case" status --porcelain)" = "$before" ] \
+  || fail "a rejected impact mismatch mutated the release tree"
+rendered="$(python3 "$contract" render-next --repo-root "$fixture_root/case")"
+[[ "$rendered" != *"impact:"* ]] \
+  || fail "release impact leaked into rendered changelog text"
+python3 "$contract" release --repo-root "$fixture_root/case" \
+  --version "$next_version" >/dev/null
+[ -f "$fixture_root/case/CHANGELOG/v1.1.0.md" ] \
+  || fail "the required impact bump wrote no snapshot"
+echo "ok - next-version matches release enforcement without mutating the tree"
 
 # The regression this file exists to prevent: prove that the repository-level
 # assertions above survive a real release, instead of asserting a pre-release
