@@ -19,15 +19,44 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - name: Build fail-closed retention plan
+      - name: Snapshot GitHub evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/ghcr_retention.py plan --output ghcr-retention-plan.json
+          python3 scripts/ghcr_retention.py inventory --output ghcr-package-inventory.json
+          if [[ "$GITHUB_REF" == 'refs/heads/main' ]]; then
+            previous_run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow ghcr-retention.yml \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+            if [[ -n "$previous_run_id" ]]; then
+              if ! gh run download "$previous_run_id" \
+                --repo "$GITHUB_REPOSITORY" \
+                --name "ghcr-retention-plan-${previous_run_id}" \
+                --dir prior-observation; then
+                rm -rf prior-observation
+                printf '::warning::Prior observation could not be downloaded; the age floor will reset.\n'
+              fi
+            fi
+          else
+            printf '::warning::Non-main ref cannot continue the observation chain; the age floor will reset.\n'
+          fi
+      - name: Build fail-closed retention plan
+        run: |
+          python3 scripts/ghcr_retention.py plan \
+            --inventory ghcr-package-inventory.json \
+            --prior-plan prior-observation/ghcr-retention-plan.json \
+            --output ghcr-retention-plan.json
           {
             printf '## GHCR retention dry run\n\n'
-            jq -r '"- Plan: `" + .plan_sha256 + "`\n- Versions: " + (.counts.versions|tostring) + "\n- Referenced untagged dependencies: " + (.counts.reachable_untagged_dependencies|tostring) + "\n- Unreachable untagged versions: " + (.counts.unreachable_untagged|tostring) + "\n- Provisional policy candidates: " + (.counts.candidates|tostring) + "\n- Pruning authorized: " + (.pruning_authorized|tostring)' ghcr-retention-plan.json
+            jq -r '"- Plan: `" + .plan_sha256 + "`\n- Observation chain: " + .observation_chain.status + "\n- Versions: " + (.counts.versions|tostring) + "\n- Referenced untagged dependencies: " + (.counts.reachable_untagged_dependencies|tostring) + "\n- Unreachable untagged versions: " + (.counts.unreachable_untagged|tostring) + "\n- Provisional policy candidates: " + (.counts.candidates|tostring) + "\n- Pruning authorized: " + (.pruning_authorized|tostring)' ghcr-retention-plan.json
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload auditable dry-run plan
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
