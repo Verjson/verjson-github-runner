@@ -53,9 +53,9 @@ done < <(
   }' "${workflow}"
 )
 
-attestation_action='actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1'
-base_attestation=$'      - name: Attest base image provenance\n        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1\n        with:\n          subject-name: ${{ env.IMAGE }}\n          subject-digest: ${{ steps.build.outputs.digest }}\n          push-to-registry: true\n          create-storage-record: false'
-kind_attestation=$'      - name: Attest kind image provenance\n        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1\n        with:\n          subject-name: ${{ env.IMAGE }}\n          subject-digest: ${{ steps.build.outputs.digest }}\n          push-to-registry: true\n          create-storage-record: false'
+attestation_action='actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2'
+base_attestation=$'      - name: Attest base image provenance\n        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2\n        with:\n          subject-name: ${{ env.IMAGE }}\n          subject-digest: ${{ steps.build.outputs.digest }}\n          push-to-registry: true\n          create-storage-record: false'
+kind_attestation=$'      - name: Attest kind image provenance\n        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2\n        with:\n          subject-name: ${{ env.IMAGE }}\n          subject-digest: ${{ steps.build.outputs.digest }}\n          push-to-registry: true\n          create-storage-record: false'
 [[ "${workflow_text}" == *"${base_attestation}"* ]] \
   || fail "base publication does not attest its build digest with the required inputs"
 [[ "${workflow_text}" == *"${kind_attestation}"* ]] \
