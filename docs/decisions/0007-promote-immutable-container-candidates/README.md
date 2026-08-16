@@ -4,7 +4,7 @@
 - **Date:** 2026-08-16
 - **Issue:** [#144](https://github.com/Verjson/verjson-github-runner/issues/144)
 - **Supersedes:** The merge-driven stable-publication and single-package storage-topology portions of [ADR 0001](../0001-attested-ci-runner-contract/README.md)
-- **Organization decision:** [Verjson/.github ADR 0078](https://github.com/Verjson/.github/tree/e12974b8070030b149ca23edfbf751fe4720b50d/docs/decisions/0078-container-release-and-runner-deployment-contract)
+- **Organization decision:** [Verjson/.github ADR 0078](https://github.com/Verjson/.github/tree/bced83b95e17c65ed4500c83756e2638f7dbb9d4/docs/decisions/0078-container-release-and-runner-deployment-contract)
 - **Category:** Release authority and production credentials — **sensitive class**
 
 ## Context

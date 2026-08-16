@@ -1,7 +1,7 @@
 # GENERATED FILE — do not edit by hand.
-# Contract: e12974b8070030b149ca23edfbf751fe4720b50d
+# Contract: bced83b95e17c65ed4500c83756e2638f7dbb9d4
 # Regenerate with:
-#   scripts/gen-container-candidate.sh workflow e12974b8070030b149ca23edfbf751fe4720b50d container-candidate.json > .github/workflows/container-candidate.yml
+#   scripts/gen-container-candidate.sh workflow bced83b95e17c65ed4500c83756e2638f7dbb9d4 container-candidate.json > .github/workflows/container-candidate.yml
 name: immutable container candidate
 
 on:
@@ -9,18 +9,30 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  attestations: write
-  contents: read
-  packages: write
-  id-token: write
-
 jobs:
-  candidate:
-    uses: Verjson/.github/.github/workflows/container-candidate.yml@e12974b8070030b149ca23edfbf751fe4720b50d
+  validate:
+    if: github.event_name == 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4
     with:
       config-path: container-candidate.json
-      contract-ref: e12974b8070030b149ca23edfbf751fe4720b50d
+      contract-ref: bced83b95e17c65ed4500c83756e2638f7dbb9d4
       acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
-    secrets:
-      NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      packages: write
+      id-token: write
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4
+    with:
+      config-path: container-candidate.json
+      contract-ref: bced83b95e17c65ed4500c83756e2638f7dbb9d4
+      acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
+
