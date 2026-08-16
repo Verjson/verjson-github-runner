@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Build and, only under explicit policy gates, apply a GHCR retention plan."""
+"""Build an auditable, strictly read-only GHCR retention inventory plan."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -22,9 +21,18 @@ PACKAGE = "gha-runner"
 IMAGE = "ghcr.io/verjson/gha-runner"
 POLICY = "ghcr-retention-v1"
 MINIMUM_AGE_DAYS = 30
-MAX_DELETE_BATCH = 50
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SYNTHETIC_ATTESTATION_TAG_RE = re.compile(r"^sha256-[0-9a-f]{64}$")
+INDEX_MEDIA_TYPES = {
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+}
+MANIFEST_MEDIA_TYPES = {
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+}
+ARTIFACT_MEDIA_TYPE = "application/vnd.oci.artifact.manifest.v1+json"
+SUPPORTED_MEDIA_TYPES = INDEX_MEDIA_TYPES | MANIFEST_MEDIA_TYPES | {ARTIFACT_MEDIA_TYPE}
 
 
 class RetentionError(RuntimeError):
@@ -36,7 +44,7 @@ class Version:
     id: int
     digest: str
     created_at: datetime
-    updated_at: str
+    updated_at: datetime
     tags: tuple[str, ...]
 
 
@@ -63,17 +71,6 @@ class ExternalApi:
         if not isinstance(result, dict):
             raise RetentionError(f"registry returned a non-object manifest for {digest}")
         return result
-
-    def delete_version(self, version_id: int) -> None:
-        self._command(
-            [
-                "gh",
-                "api",
-                "--method",
-                "DELETE",
-                f"/orgs/{OWNER}/packages/container/{PACKAGE}/versions/{version_id}",
-            ]
-        )
 
     @staticmethod
     def _command(command: list[str]) -> str:
@@ -147,7 +144,7 @@ def parse_versions(raw_versions: Iterable[dict[str, Any]]) -> list[Version]:
                 id=version_id,
                 digest=digest,
                 created_at=parse_time(created_at_raw),
-                updated_at=updated_at,
+                updated_at=parse_time(updated_at),
                 tags=tuple(sorted(set(tags_raw))),
             )
         )
@@ -158,39 +155,79 @@ def parse_versions(raw_versions: Iterable[dict[str, Any]]) -> list[Version]:
     return versions
 
 
-def descriptor_digests(value: Any) -> set[str]:
-    found: set[str] = set()
-    if isinstance(value, dict):
-        digest = value.get("digest")
-        if isinstance(digest, str) and DIGEST_RE.fullmatch(digest):
-            found.add(digest)
-        for child in value.values():
-            found.update(descriptor_digests(child))
-    elif isinstance(value, list):
-        for child in value:
-            found.update(descriptor_digests(child))
-    return found
+def parse_descriptor(value: Any, location: str, allowed_media_types: set[str] | None = None) -> str:
+    if not isinstance(value, dict):
+        raise RetentionError(f"{location} is not an OCI descriptor")
+    media_type = value.get("mediaType")
+    digest = value.get("digest")
+    size = value.get("size")
+    if not isinstance(media_type, str) or not media_type:
+        raise RetentionError(f"{location} descriptor has no mediaType")
+    if allowed_media_types is not None and media_type not in allowed_media_types:
+        raise RetentionError(f"{location} descriptor has unsupported mediaType: {media_type}")
+    if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+        raise RetentionError(f"{location} descriptor has an invalid digest")
+    if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+        raise RetentionError(f"{location} descriptor has an invalid size")
+    annotations = value.get("annotations")
+    if annotations is not None and (
+        not isinstance(annotations, dict)
+        or not all(isinstance(key, str) and isinstance(item, str) for key, item in annotations.items())
+    ):
+        raise RetentionError(f"{location} descriptor has invalid annotations")
+    return digest
 
 
-def parse_protected_digests(raw: str) -> set[str]:
-    if not raw.strip():
-        return set()
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        value = [line.strip() for line in raw.splitlines() if line.strip()]
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise RetentionError("protected digests must be a JSON array or one digest per line")
-    protected = set(value)
-    invalid = sorted(digest for digest in protected if not DIGEST_RE.fullmatch(digest))
-    if invalid:
-        raise RetentionError(f"invalid protected digest: {invalid[0]}")
-    return protected
+def parse_manifest_evidence(digest: str, value: Any) -> tuple[set[str], str | None]:
+    if not isinstance(value, dict):
+        raise RetentionError(f"manifest {digest} is not a JSON object")
+    if value.get("schemaVersion") != 2:
+        raise RetentionError(f"manifest {digest} has unsupported or missing schemaVersion")
+    media_type = value.get("mediaType")
+    if media_type not in SUPPORTED_MEDIA_TYPES:
+        raise RetentionError(f"manifest {digest} has unsupported or missing mediaType: {media_type!r}")
+
+    dependencies: set[str] = set()
+    if media_type in INDEX_MEDIA_TYPES:
+        descriptors = value.get("manifests")
+        if not isinstance(descriptors, list) or not descriptors:
+            raise RetentionError(f"index {digest} has no manifest descriptors")
+        for index, descriptor in enumerate(descriptors):
+            dependencies.add(
+                parse_descriptor(descriptor, f"manifest {digest} manifests[{index}]", SUPPORTED_MEDIA_TYPES)
+            )
+    elif media_type in MANIFEST_MEDIA_TYPES:
+        parse_descriptor(value.get("config"), f"manifest {digest} config")
+        layers = value.get("layers")
+        if not isinstance(layers, list):
+            raise RetentionError(f"manifest {digest} layers is not a list")
+        for index, descriptor in enumerate(layers):
+            parse_descriptor(descriptor, f"manifest {digest} layers[{index}]")
+    else:
+        artifact_type = value.get("artifactType")
+        if not isinstance(artifact_type, str) or not artifact_type:
+            raise RetentionError(f"artifact manifest {digest} has no artifactType")
+        blobs = value.get("blobs")
+        if not isinstance(blobs, list):
+            raise RetentionError(f"artifact manifest {digest} blobs is not a list")
+        for index, descriptor in enumerate(blobs):
+            parse_descriptor(descriptor, f"manifest {digest} blobs[{index}]")
+
+    subject_value = value.get("subject")
+    subject = None
+    if subject_value is not None:
+        subject = parse_descriptor(subject_value, f"manifest {digest} subject", SUPPORTED_MEDIA_TYPES)
+    return dependencies, subject
 
 
 def inventory_fingerprint(versions: Iterable[Version]) -> str:
     inventory = [
-        {"id": version.id, "digest": version.digest, "updated_at": version.updated_at, "tags": version.tags}
+        {
+            "id": version.id,
+            "digest": version.digest,
+            "updated_at": version.updated_at.isoformat().replace("+00:00", "Z"),
+            "tags": version.tags,
+        }
         for version in sorted(versions, key=lambda item: item.id)
     ]
     return sha256(inventory)
@@ -214,36 +251,32 @@ def inspect_manifests(api: ExternalApi, digests: Iterable[str]) -> dict[str, dic
     return manifests
 
 
-def build_plan(
-    api: ExternalApi,
-    protected: set[str],
-    now: datetime,
-) -> dict[str, Any]:
+def build_plan(api: ExternalApi, now: datetime) -> dict[str, Any]:
     if now.tzinfo is None:
         raise RetentionError("plan clock must be timezone-aware")
     versions = parse_versions(api.package_versions())
     by_digest = {version.digest: version for version in versions}
-    missing_protected = sorted(protected - by_digest.keys())
-    if missing_protected:
-        raise RetentionError(f"protected deployment digest is absent from GHCR: {missing_protected[0]}")
 
     dependencies: dict[str, set[str]] = {digest: set() for digest in by_digest}
     parents: dict[str, set[str]] = {digest: set() for digest in by_digest}
     subjects: dict[str, str] = {}
     manifests = inspect_manifests(api, by_digest)
     for digest in sorted(by_digest):
-        manifest = manifests[digest]
-        subject = manifest.get("subject")
-        if isinstance(subject, dict):
-            subject_digest = subject.get("digest")
-            if isinstance(subject_digest, str) and subject_digest in by_digest:
-                subjects[digest] = subject_digest
-        content = {key: value for key, value in manifest.items() if key != "subject"}
-        referenced = descriptor_digests(content) & by_digest.keys()
-        referenced.discard(digest)
+        referenced, subject = parse_manifest_evidence(digest, manifests[digest])
+        missing = sorted(referenced - by_digest.keys())
+        if missing:
+            raise RetentionError(f"manifest {digest} references a version absent from inventory: {missing[0]}")
+        if digest in referenced:
+            raise RetentionError(f"manifest {digest} references itself")
         dependencies[digest].update(referenced)
         for child in referenced:
             parents[child].add(digest)
+        if subject is not None:
+            if subject not in by_digest:
+                raise RetentionError(f"manifest {digest} subject is absent from inventory: {subject}")
+            if subject == digest:
+                raise RetentionError(f"manifest {digest} names itself as subject")
+            subjects[digest] = subject
 
     for referrer, subject in subjects.items():
         dependencies[subject].add(referrer)
@@ -255,7 +288,7 @@ def build_plan(
         if any(not SYNTHETIC_ATTESTATION_TAG_RE.fullmatch(tag) for tag in version.tags)
     }
     tagged = {version.digest for version in versions if version.tags}
-    roots = tagged | protected
+    roots = tagged
     reachable: set[str] = set()
     pending = list(roots)
     while pending:
@@ -270,18 +303,17 @@ def build_plan(
         (
             version
             for version in versions
-            if not version.tags and version.created_at < cutoff and version.digest not in reachable
+            if not version.tags
+            and max(version.created_at, version.updated_at) < cutoff
+            and version.digest not in reachable
         ),
-        key=lambda version: (version.created_at, version.id),
+        key=lambda version: (max(version.created_at, version.updated_at), version.id),
     )
-    delete_batch = candidates[:MAX_DELETE_BATCH]
     candidate_digests = {version.digest for version in candidates}
     untagged = [version for version in versions if not version.tags]
     classifications = []
     for version in sorted(untagged, key=lambda item: item.id):
-        if version.digest in protected:
-            classification = "deployment_or_rollback_root"
-        elif version.digest in reachable:
+        if version.digest in reachable:
             classification = "referenced_oci_dependency"
         elif version.digest in candidate_digests:
             classification = "retention_candidate"
@@ -298,12 +330,15 @@ def build_plan(
         "image": IMAGE,
         "generated_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "minimum_age_days": MINIMUM_AGE_DAYS,
-        "max_delete_batch": MAX_DELETE_BATCH,
         "inventory_fingerprint": inventory_fingerprint(versions),
-        "protected_digests": sorted(protected),
-        "protected_digests_fingerprint": sha256(sorted(protected)),
-        "deployment_inventory_supplied": bool(protected),
-        "eligible_for_apply": bool(protected) and bool(delete_batch),
+        "pruning_authorized": False,
+        "authorization_blockers": [
+            "explicit pruning authorization",
+            "protected reviewer environment with verified governing policy",
+            "operator-supplied identity of a previously reviewed plan",
+            "strict durable evidence before and after every package mutation",
+            "fresh completeness-verifiable deployment and rollback receipt",
+        ],
         "counts": {
             "versions": len(versions),
             "tagged": sum(bool(version.tags) for version in versions),
@@ -316,10 +351,7 @@ def build_plan(
             ),
             "reachable": len(reachable),
             "reachable_untagged_dependencies": sum(
-                version.digest in reachable and version.digest not in protected for version in untagged
-            ),
-            "protected_untagged_deployment_or_rollback_roots": sum(
-                version.digest in protected for version in untagged
+                version.digest in reachable for version in untagged
             ),
             "unreachable_untagged": sum(version.digest not in reachable for version in untagged),
             "unreachable_inside_age_floor": sum(
@@ -327,18 +359,20 @@ def build_plan(
                 for version in untagged
             ),
             "candidates": len(candidates),
-            "delete_batch": len(delete_batch),
-            "deferred_candidates": max(0, len(candidates) - len(delete_batch)),
         },
         "untagged_classifications": classifications,
-        "delete_batch": [
+        "policy_candidates": [
             {
                 "id": version.id,
                 "digest": version.digest,
                 "created_at": version.created_at.isoformat().replace("+00:00", "Z"),
-                "reason": "untagged, older than policy floor, and unreachable from protected roots",
+                "updated_at": version.updated_at.isoformat().replace("+00:00", "Z"),
+                "age_reference": max(version.created_at, version.updated_at)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "reason": "untagged, outside the age floor, and unreachable from tagged OCI roots",
             }
-            for version in delete_batch
+            for version in candidates
         ],
     }
     plan["plan_sha256"] = sha256(plan)
@@ -359,7 +393,7 @@ def verify_plan(plan: dict[str, Any]) -> str:
         or plan.get("package") != PACKAGE
         or plan.get("image") != IMAGE
         or plan.get("minimum_age_days") != MINIMUM_AGE_DAYS
-        or plan.get("max_delete_batch") != MAX_DELETE_BATCH
+        or plan.get("pruning_authorized") is not False
     ):
         raise RetentionError("retention plan does not match the governing policy")
     return actual
@@ -371,64 +405,11 @@ def write_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
-def apply_plan(
-    api: ExternalApi,
-    plan: dict[str, Any],
-    protected: set[str],
-    confirm_sha256: str,
-    authorization: str,
-    receipt_path: Path,
-    now: datetime,
-) -> dict[str, Any]:
-    plan_hash = verify_plan(plan)
-    if authorization != POLICY:
-        raise RetentionError("manual deletion policy is not enabled")
-    if confirm_sha256 != plan_hash:
-        raise RetentionError("manual confirmation does not match the reviewed plan")
-    if not plan.get("deployment_inventory_supplied") or not plan.get("eligible_for_apply"):
-        raise RetentionError("plan is ineligible: protected deployment inventory and candidates are required")
-    if plan.get("protected_digests") != sorted(protected):
-        raise RetentionError("protected deployment inventory changed after the plan was created")
-    batch = plan.get("delete_batch")
-    if not isinstance(batch, list) or not batch or len(batch) > MAX_DELETE_BATCH:
-        raise RetentionError("delete batch is empty or exceeds the policy bound")
-
-    replacement = build_plan(api, protected, now)
-    if replacement["inventory_fingerprint"] != plan.get("inventory_fingerprint"):
-        raise RetentionError("GHCR inventory changed after the plan was created")
-    replacement_targets = [(item["id"], item["digest"]) for item in replacement["delete_batch"]]
-    planned_targets = [(item.get("id"), item.get("digest")) for item in batch if isinstance(item, dict)]
-    if replacement_targets != planned_targets:
-        raise RetentionError("retention decision changed after the plan was created")
-
-    receipt: dict[str, Any] = {
-        "schema_version": 1,
-        "policy": POLICY,
-        "plan_sha256": plan_hash,
-        "started_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "deleted": [],
-        "status": "in_progress",
-    }
-    write_json(receipt_path, receipt)
-    for target in batch:
-        api.delete_version(target["id"])
-        receipt["deleted"].append({"id": target["id"], "digest": target["digest"]})
-        write_json(receipt_path, receipt)
-    receipt["status"] = "complete"
-    write_json(receipt_path, receipt)
-    return receipt
-
-
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     subcommands = root.add_subparsers(dest="command", required=True)
     plan = subcommands.add_parser("plan")
     plan.add_argument("--output", type=Path, required=True)
-    apply = subcommands.add_parser("apply")
-    apply.add_argument("--plan", type=Path, required=True)
-    apply.add_argument("--confirm-plan-sha256", required=True)
-    apply.add_argument("--authorization", required=True)
-    apply.add_argument("--receipt-output", type=Path, required=True)
     return root
 
 
@@ -436,24 +417,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     api = ExternalApi()
     try:
-        protected = parse_protected_digests(os.environ.get("GHCR_PROTECTED_DIGESTS", ""))
         now = datetime.now(timezone.utc)
-        if args.command == "plan":
-            plan = build_plan(api, protected, now)
-            write_json(args.output, plan)
-            print(json.dumps({"plan_sha256": plan["plan_sha256"], **plan["counts"]}, sort_keys=True))
-        else:
-            plan = json.loads(args.plan.read_text())
-            receipt = apply_plan(
-                api,
-                plan,
-                protected,
-                args.confirm_plan_sha256,
-                args.authorization,
-                args.receipt_output,
-                now,
-            )
-            print(json.dumps(receipt, sort_keys=True))
+        plan = build_plan(api, now)
+        write_json(args.output, plan)
+        print(json.dumps({"plan_sha256": plan["plan_sha256"], **plan["counts"]}, sort_keys=True))
     except (OSError, json.JSONDecodeError, RetentionError) as error:
         print(f"ghcr retention: {error}", file=sys.stderr)
         return 1
