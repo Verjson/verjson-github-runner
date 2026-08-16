@@ -3,6 +3,7 @@
 <!-- BEGIN ADR INDEX -->
 | # | Date | Decision |
 |---|------|----------|
+| [0008](0008-integrity-verified-ghcr-observation-chain/README.md) | 2026-08-16 | Require an integrity-verified GHCR untagged-observation chain |
 | [0007](0007-promote-immutable-container-candidates/README.md) | 2026-08-16 | Promote immutable container candidates by explicit dispatch |
 | [0006](0006-safe-ghcr-retention/README.md) | 2026-08-16 | Classify GHCR retention candidates without deletion authority |
 | [0005](0005-fresh-container-ephemeral-lifecycle/README.md) | 2026-07-28 | Ephemeral means a fresh disposable job container |

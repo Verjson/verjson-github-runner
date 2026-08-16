@@ -11,10 +11,27 @@ fail() {
 
 grep -Fq -- "- cron: '23 6 * * 1'" "$workflow" || fail "weekly dry-run schedule is missing"
 grep -Fq 'workflow_dispatch:' "$workflow" || fail "manual dry-run trigger is missing"
+grep -Fq 'actions: read' "$workflow" || fail "prior artifact access lacks actions-read permission"
 grep -Fq 'packages: read' "$workflow" || fail "inventory lacks package read permission"
 grep -Fq 'pruning_authorized' "$workflow" || fail "summary does not state authorization status"
+grep -Fq 'persist-credentials: false' "$workflow" || fail "checkout persists GitHub credentials"
+grep -Fq 'ghcr_retention.py inventory' "$workflow" || fail "token-scoped inventory step is missing"
+grep -Fq 'ghcr_retention.py prior-evidence' "$workflow" \
+  || fail "latest successful artifact evidence is not selected"
+grep -Fq -- '--expected-prior ghcr-expected-prior.json' "$workflow" \
+  || fail "planner does not bind evidence to the latest selected run"
+grep -Fq -- '--prior-evidence ghcr-prior-evidence.json' "$workflow" \
+  || fail "durable prior evidence is not consumed"
+grep -Fq "ghcr-retention-plan-\${{ github.run_id }}-\${{ github.run_attempt }}" "$workflow" \
+  || fail "artifact identity is not bound to run id and attempt"
+
+plan_step="$(sed -n '/- name: Build fail-closed retention plan/,/- name: Upload auditable dry-run plan/p' "$workflow")"
+if grep -Fq 'GH_TOKEN' <<<"$plan_step"; then
+  fail "registry inspection step inherits GH_TOKEN"
+fi
 
 for forbidden in \
+  'actions: write' \
   'packages: write' \
   'environment:' \
   'GHCR_PROTECTED_DIGESTS' \
