@@ -5,13 +5,18 @@ on:
     inputs:
       version: {required: true, type: string}
       candidate-manifest: {required: true, type: string}
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
 jobs:
   release:
-    uses: Verjson/.github/.github/workflows/container-release.yml@4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9
+    uses: Verjson/.github/.github/workflows/container-release.yml@e12974b8070030b149ca23edfbf751fe4720b50d
     with:
       version: ${{ inputs.version }}
       candidate-manifest: ${{ inputs.candidate-manifest }}
       config-path: container-candidate.json
-      contract-ref: 4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9
+      contract-ref: e12974b8070030b149ca23edfbf751fe4720b50d
     secrets:
       release-token: ${{ secrets.VERJSON_RELEASE_TOKEN }}

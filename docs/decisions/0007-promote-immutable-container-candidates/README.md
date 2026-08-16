@@ -4,7 +4,7 @@
 - **Date:** 2026-08-16
 - **Issue:** [#144](https://github.com/Verjson/verjson-github-runner/issues/144)
 - **Supersedes:** The merge-driven stable-publication and single-package storage-topology portions of [ADR 0001](../0001-attested-ci-runner-contract/README.md)
-- **Organization decision:** [Verjson/.github ADR 0078](https://github.com/Verjson/.github/tree/4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9/docs/decisions/0078-container-release-and-runner-deployment-contract)
+- **Organization decision:** [Verjson/.github ADR 0078](https://github.com/Verjson/.github/tree/e12974b8070030b149ca23edfbf751fe4720b50d/docs/decisions/0078-container-release-and-runner-deployment-contract)
 - **Category:** Release authority and production credentials — **sensitive class**
 
 ## Context
@@ -34,8 +34,11 @@ manifest, provenance, SBOM, and same-run base-digest relationship.
 Only `.github/workflows/container-release.yml`, invoked by `workflow_dispatch` from the
 protected default branch, may promote a retained candidate to the reviewed stable
 version. Promotion copies the exact candidate digests to stable aliases and must not
-invoke a Dockerfile or rebuild an image. The signed release manifest is authoritative;
-mutable aliases are conveniences and are never deployment inputs.
+invoke a Dockerfile or rebuild an image. Dispatches for one repository and version are
+serialized. Before publication, promotion verifies signed provenance and SPDX evidence,
+then reconciles the complete stable-alias set and attests the immutable release manifest.
+That signed manifest is authoritative; mutable aliases are conveniences and are never
+deployment inputs.
 
 This decision supersedes ADR 0001's merge-driven stable-publication workflow, legacy
 signer-workflow path, and requirement that every variant share one GHCR package. ADR
@@ -49,6 +52,10 @@ identity becomes the pinned canonical candidate workflow recorded in
 
 - Merging cannot update stable production aliases.
 - Stable release authority is explicit, versioned, auditable, and does not rebuild.
+- Concurrent promotion cannot race the same stable version, and publication stops unless
+  the complete alias set resolves to the selected candidate digests.
+- Production consumers can require signed provenance, SPDX evidence, and an attested
+  release manifest rather than trusting registry aliases.
 - Every derived image is published in its own repository so one variant cannot replace
   another variant's candidate or stable alias.
 - The runner family remains one shared cross-organization capability and provenance

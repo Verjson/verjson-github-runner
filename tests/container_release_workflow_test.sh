@@ -6,7 +6,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-contract_ref="4b2554d5b6064e8cd6e4b3ad5edb2a9eb214a6b9"
+contract_ref="e12974b8070030b149ca23edfbf751fe4720b50d"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 base_image="ghcr.io/verjson/gha-runner@sha256:d97a218b5c7834f1a34fc4e13760ad16b692504dc79c38f92a1a8bb3b286db85"
 
@@ -86,6 +86,8 @@ grep -qx '  pull_request:' "${candidate}" || fail "pull requests do not exercise
   || fail "candidate caller contains a stable alias"
 grep -Fq "container-candidate.yml@${contract_ref}" "${candidate}" \
   || fail "candidate caller does not use the reviewed canonical contract"
+grep -qx '  attestations: write' "${candidate}" \
+  || fail "candidate caller cannot publish signed candidate manifests"
 
 grep -qx '  workflow_dispatch:' "${release}" || fail "stable promotion is not explicitly dispatched"
 ! grep -Eq '^  (push|pull_request):' "${release}" \
@@ -94,5 +96,9 @@ grep -qx '  workflow_dispatch:' "${release}" || fail "stable promotion is not ex
   || fail "release caller rebuilds instead of promoting retained digests"
 grep -Fq "container-release.yml@${contract_ref}" "${release}" \
   || fail "release caller does not use the reviewed canonical contract"
+grep -qx '  attestations: write' "${release}" \
+  || fail "release caller cannot publish a signed release manifest"
+[[ -x "${root}/scripts/container_attestation_verify.py" ]] \
+  || fail "release caller lacks the generated attestation verifier"
 
 echo "container release workflow tests passed"

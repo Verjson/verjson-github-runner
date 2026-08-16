@@ -37,8 +37,10 @@ release dispatch promotes their exact digests without rebuilding:
 | `ghcr.io/verjson/gha-runner-pwsh` | base + pinned PowerShell; advertise the distinct `pwsh` runner label |
 
 Each repository receives `sha-<commit>` and `0.2.0-rc.<run>.<attempt>` candidate
-identities. Stable version aliases are written only by `.github/workflows/container-release.yml`.
-Automation consumes the signed release manifest's digests, never mutable aliases.
+identities. Stable version aliases are written only by `.github/workflows/container-release.yml`,
+with dispatches serialized per repository and version. Promotion verifies signed
+provenance and SPDX evidence, reconciles the complete alias set, and attests the immutable
+release manifest. Automation consumes that signed manifest's digests, never mutable aliases.
 
 - Every image preloads the immutable changelog engines listed in
   `images/changelog-tools.manifest` under `/opt/verjson/changelog-tools` and
@@ -50,9 +52,10 @@ Automation consumes the signed release manifest's digests, never mutable aliases
 - The **base image ships `gh`, Node.js 24/npm, and Docker CLI + buildx + compose plugins**, so
   `[self-hosted, docker]` jobs can run `docker build --secret` (BuildKit) and
   `docker compose` against a mounted host socket.
-- Every published image includes BuildKit SBOM and provenance attestations. Each publish
-  run also retains a receipt mapping every commit-addressed `:*-<sha>` tag to its immutable
-  manifest digest. Language and PowerShell variants build from the exact base manifest
+- Every published image includes BuildKit SBOM and provenance attestations. Candidate
+  publication also attests the complete candidate manifest, and stable promotion retains
+  verified provenance/SPDX receipts plus an attested release manifest. Language and
+  PowerShell variants build from the exact base manifest
   digest output by that run, never from a mutable base tag.
 
 **Two ways to consume the same image:**
