@@ -57,3 +57,19 @@ jobs:
           path: ghcr-retention-plan.json
           if-no-files-found: error
           retention-days: 90
+      - name: Build held deletion preview
+        run: |
+          python3 scripts/ghcr_retention.py preview \
+            --plan ghcr-retention-plan.json \
+            --output ghcr-retention-preview.json
+          {
+            printf '\n## Held deletion preview\n\n'
+            jq -r '"- Preview: `" + .preview_sha256 + "`\n- Dry run: " + (.dry_run|tostring) + "\n- Deletion authorized: " + (.deletion_authorized|tostring) + "\n- Held requests: " + (.delete_requests|length|tostring)' ghcr-retention-preview.json
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Upload held deletion preview
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ghcr-retention-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ghcr-retention-preview.json
+          if-no-files-found: error
+          retention-days: 90

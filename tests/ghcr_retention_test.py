@@ -481,6 +481,52 @@ class RetentionPlanTests(unittest.TestCase):
             retention.verify_plan(plan)
 
 
+    def test_deletion_preview_separates_candidates_from_explicit_protections(self):
+        platform = image_manifest(marker="d")
+        root = image_index(
+            (platform[0], platform[1], "application/vnd.oci.image.manifest.v1+json")
+        )
+        attestation = artifact_manifest(
+            (root[0], root[1], "application/vnd.oci.image.index.v1+json")
+        )
+        orphan = image_manifest(marker="e")
+        versions = [
+            raw_version(1, root[0], self.old, ["0.2.0"]),
+            raw_version(2, platform[0], self.old),
+            raw_version(3, attestation[0], self.old, ["sha256-" + "f" * 64]),
+            raw_version(4, orphan[0], self.old),
+        ]
+        manifests = dict(
+            (item[0], item[1]) for item in [platform, root, attestation, orphan]
+        )
+
+        plan = self.continuous_plan(versions, manifests)
+        preview = retention.build_deletion_preview(plan)
+
+        self.assertEqual([{"id": 4, "digest": orphan[0]}], preview["delete_requests"])
+        self.assertTrue(preview["dry_run"])
+        self.assertFalse(preview["deletion_authorized"])
+        self.assertEqual(2, preview["protected_counts"]["tagged_versions"])
+        self.assertEqual(1, preview["protected_counts"]["oci_dependencies"])
+        self.assertEqual(1, preview["protected_counts"]["attestations"])
+
+    def test_deletion_preview_fails_when_candidate_overlaps_protected_digest(self):
+        orphan = image_manifest(marker="f")
+        plan = self.continuous_plan(
+            [raw_version(1, orphan[0], self.old)], {orphan[0]: orphan[1]}
+        )
+        unsigned = dict(plan)
+        unsigned["protected"] = {
+            **plan["protected"],
+            "oci_dependencies": [orphan[0]],
+        }
+        unsigned.pop("plan_sha256")
+        unsigned["plan_sha256"] = retention.sha256(unsigned)
+
+        with self.assertRaisesRegex(retention.RetentionError, "overlaps protected"):
+            retention.build_deletion_preview(unsigned)
+
+
 class ExternalAdapterTests(unittest.TestCase):
     def completed(self, stdout=b"", stderr=b""):
         return subprocess.CompletedProcess([], 0, stdout=stdout, stderr=stderr)

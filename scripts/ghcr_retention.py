@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an auditable, strictly read-only GHCR retention inventory plan."""
+"""Build auditable, strictly read-only GHCR retention plans and deletion previews."""
 
 from __future__ import annotations
 
@@ -801,6 +801,19 @@ def build_plan(
             "previous_artifact": prior_provenance["artifact"] if prior_provenance else None,
         },
         "pruning_authorized": False,
+        "protected": {
+            "tagged_versions": [
+                {"id": version.id, "digest": version.digest, "tags": list(version.tags)}
+                for version in sorted(versions, key=lambda item: item.id)
+                if version.tags
+            ],
+            "oci_dependencies": sorted(reachable - tagged),
+            "attestations": sorted(
+                digest
+                for digest, subject in subjects.items()
+                if digest in reachable and subject in reachable
+            ),
+        },
         "authorization_blockers": [
             "explicit pruning authorization",
             "protected reviewer environment with verified governing policy",
@@ -871,6 +884,99 @@ def verify_plan(plan: dict[str, Any]) -> str:
     return actual
 
 
+def build_deletion_preview(plan: dict[str, Any]) -> dict[str, Any]:
+    """Produce a non-authorizing mutation manifest after strict plan validation."""
+    plan_hash = verify_plan(plan)
+    protected = plan.get("protected")
+    if not isinstance(protected, dict) or set(protected) != {
+        "tagged_versions",
+        "oci_dependencies",
+        "attestations",
+    }:
+        raise RetentionError("retention plan has invalid protected-version evidence")
+
+    protected_digests: set[str] = set()
+    protected_ids: set[int] = set()
+    tagged = protected["tagged_versions"]
+    if not isinstance(tagged, list):
+        raise RetentionError("protected tagged-version evidence is invalid")
+    for item in tagged:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"id", "digest", "tags"}
+            or not isinstance(item["id"], int)
+            or isinstance(item["id"], bool)
+            or item["id"] <= 0
+            or not isinstance(item["digest"], str)
+            or not DIGEST_RE.fullmatch(item["digest"])
+            or not isinstance(item["tags"], list)
+            or not item["tags"]
+            or not all(isinstance(tag, str) and tag for tag in item["tags"])
+        ):
+            raise RetentionError("protected tagged-version entry is invalid")
+        if item["id"] in protected_ids or item["digest"] in protected_digests:
+            raise RetentionError("protected tagged-version evidence contains duplicates")
+        protected_ids.add(item["id"])
+        protected_digests.add(item["digest"])
+
+    for field in ("oci_dependencies", "attestations"):
+        values = protected[field]
+        if (
+            not isinstance(values, list)
+            or values != sorted(set(values))
+            or not all(isinstance(value, str) and DIGEST_RE.fullmatch(value) for value in values)
+        ):
+            raise RetentionError(f"protected {field} evidence is invalid")
+        protected_digests.update(values)
+
+    candidates = plan.get("policy_candidates")
+    if not isinstance(candidates, list):
+        raise RetentionError("retention plan candidate evidence is invalid")
+    deletions = []
+    seen_ids: set[int] = set()
+    seen_digests: set[str] = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            raise RetentionError("retention plan candidate entry is invalid")
+        version_id = candidate.get("id")
+        digest = candidate.get("digest")
+        if (
+            not isinstance(version_id, int)
+            or isinstance(version_id, bool)
+            or version_id <= 0
+            or not isinstance(digest, str)
+            or not DIGEST_RE.fullmatch(digest)
+            or version_id in seen_ids
+            or digest in seen_digests
+            or version_id in protected_ids
+            or digest in protected_digests
+        ):
+            raise RetentionError("candidate overlaps protected or duplicate evidence")
+        seen_ids.add(version_id)
+        seen_digests.add(digest)
+        deletions.append({"id": version_id, "digest": digest})
+
+    if plan.get("counts", {}).get("candidates") != len(deletions):
+        raise RetentionError("candidate count does not match deletion preview")
+    preview = {
+        "schema_version": 1,
+        "policy": POLICY,
+        "plan_sha256": plan_hash,
+        "generated_at": format_time(datetime.now(timezone.utc)),
+        "dry_run": True,
+        "deletion_authorized": False,
+        "delete_requests": deletions,
+        "protected_counts": {
+            "tagged_versions": len(tagged),
+            "oci_dependencies": len(protected["oci_dependencies"]),
+            "attestations": len(protected["attestations"]),
+        },
+        "race_guard": "re-inventory and rebuild the plan immediately before any separately authorized mutation",
+    }
+    preview["preview_sha256"] = sha256(preview)
+    return preview
+
+
 def read_json(path: Path) -> Any:
     try:
         return parse_json(path.read_bytes(), str(path))
@@ -915,6 +1021,9 @@ def parser() -> argparse.ArgumentParser:
     plan.add_argument("--run-attempt", type=int, required=True)
     plan.add_argument("--head-sha", required=True)
     plan.add_argument("--output", type=Path, required=True)
+    preview = subcommands.add_parser("preview")
+    preview.add_argument("--plan", type=Path, required=True)
+    preview.add_argument("--output", type=Path, required=True)
     return root
 
 
@@ -946,6 +1055,23 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             write_json(args.expected_output, expected)
             write_json(args.evidence_output, evidence)
+            return 0
+        if args.command == "preview":
+            value = read_json(args.plan)
+            if not isinstance(value, dict):
+                raise RetentionError("plan input is not an object")
+            preview = build_deletion_preview(value)
+            write_json(args.output, preview)
+            print(
+                json.dumps(
+                    {
+                        "preview_sha256": preview["preview_sha256"],
+                        "dry_run": True,
+                        "delete_requests": len(preview["delete_requests"]),
+                    },
+                    sort_keys=True,
+                )
+            )
             return 0
         inventory = read_json(args.inventory)
         if not isinstance(inventory, list):
