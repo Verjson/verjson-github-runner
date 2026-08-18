@@ -1523,6 +1523,98 @@ echo "Test 45: ci admission keeps the one-use PAT transport"
     "Consumes the PAT then attests, without imposing a host check on an image probe"
 )
 
+# -----------------------------------------------------------------------------
+# Test 46: claim_work_root records the holding runner's identity
+# -----------------------------------------------------------------------------
+echo "Test 46: claim_work_root records the holding runner's identity"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  claim_dir="${TMP_DIR}/claim_root"
+  mkdir -p "${claim_dir}"
+  cd "${claim_dir}"
+  RUNNER_NAME="gha-general-10"
+  RUNNER_WORKDIR="_work"
+
+  claim_work_root
+  status=$?
+
+  assert_eq "0" "${status}" "Claims an unclaimed work root"
+  assert_file_exists "${claim_dir}/_work/.gha-work-root.lock" "Records the claim in the work root"
+  assert_contains "runner=gha-general-10" "$(< "${claim_dir}/_work/.gha-work-root.lock")" \
+    "Names the claiming runner for operator diagnostics"
+  assert_contains "pid=$$" "$(< "${claim_dir}/_work/.gha-work-root.lock")" \
+    "Records the claiming process id for operator diagnostics"
+)
+
+# -----------------------------------------------------------------------------
+# Test 47: claim_work_root fails closed against an already-claimed work root
+# -----------------------------------------------------------------------------
+echo "Test 47: claim_work_root fails closed against an already-claimed work root"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  claim_dir="${TMP_DIR}/claim_conflict"
+  mkdir -p "${claim_dir}/_work"
+  cd "${claim_dir}"
+
+  # Hold the lock from a real, still-running background process — the scenario a
+  # same-process re-claim cannot exercise, since a process always holds its own flock.
+  holder_log="${TMP_DIR}/claim_conflict_holder.log"
+  (
+    exec 9>>"_work/.gha-work-root.lock"
+    flock 9
+    printf 'runner=gha-general-9 pid=%s\n' "$$" > "_work/.gha-work-root.lock"
+    echo ready >> "${holder_log}"
+    sleep 5
+  ) &
+  holder_pid=$!
+  for _ in $(seq 1 50); do
+    [[ -s "${holder_log}" ]] && break
+    sleep 0.1
+  done
+
+  RUNNER_NAME="gha-general-10"
+  RUNNER_WORKDIR="_work"
+  set +e
+  output="$(claim_work_root 2>&1)"
+  status=$?
+  set -e
+  kill "${holder_pid}" 2>/dev/null || true
+  wait "${holder_pid}" 2>/dev/null || true
+
+  assert_eq "1" "${status}" "Refuses a work root another live runner process already holds"
+  assert_contains "already claimed by another active runner process" "${output}" \
+    "Explains the collision rather than silently sharing the checkout"
+  assert_contains "gha-general-9" "${output}" "Names the other holder so operators can find the collision"
+)
+
+# -----------------------------------------------------------------------------
+# Test 48: main claims the work root before resolving any registration token
+# -----------------------------------------------------------------------------
+echo "Test 48: main claims the work root before token resolution"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/claim_order.log"
+  RUNNER_DIR="${TMP_DIR}/claim_order_dir"
+  mkdir -p "${RUNNER_DIR}"
+  GITHUB_URL="https://github.com/Verjson"
+  RUNNER_LABELS="self-hosted,general"
+
+  attest_host_capacity() { echo "capacity" >> "${order_log}"; }
+  consume_github_pat() { echo "consume-pat" >> "${order_log}"; }
+  claim_work_root() { echo "claim" >> "${order_log}"; return 1; }
+  resolve_token() { echo "resolve-token" >> "${order_log}"; }
+  attest_runner_labels() { echo "labels" >> "${order_log}"; }
+
+  set +e
+  main >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "A refused work-root claim fails main before registration"
+  assert_eq $'capacity\nconsume-pat\nclaim' "$(< "${order_log}")" \
+    "Claims the work root before attesting labels or resolving a token"
+)
+
 echo "-----------------------------------------------------------------------------"
 passed_count=$(find "${TMP_DIR}" -name 'passed_*' | wc -l | tr -d ' ')
 failed_count=$(find "${TMP_DIR}" -name 'failed_*' | wc -l | tr -d ' ')
