@@ -36,6 +36,8 @@ jobs:
         run: bash tests/changelog_tool_cache_test.sh
       - name: Prove ephemeral jobs receive fresh writable layers
         run: bash tests/ephemeral_supervisor_integration.sh
+      - name: Prove concurrent runners cannot share one work root
+        run: bash tests/work_root_isolation_test.sh
       - name: Canonical changelog contract holds
         run: bash scripts/changelog-contract.test.sh
 

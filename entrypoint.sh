@@ -11,7 +11,10 @@ set -euo pipefail
 #   RUNNER_NAME      — optional, runner hostname identifier (defaults to system hostname)
 #   RUNNER_LABELS    — optional labels (defaults to self-hosted,linux,<runtime architecture>,docker)
 #   RUNNER_GROUP     — optional, org runner group name (defaults to Default)
-#   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work)
+#   RUNNER_WORKDIR   — optional, workspace folder for job runs (defaults to _work). This
+#                      process holds an exclusive lock on the resolved work root for its
+#                      entire lifetime — see claim_work_root — so two runner processes can
+#                      never be admitted onto the same on-disk checkout.
 #   RUNNER_EPHEMERAL — optional boolean; true runs one job in this container
 #   RUNNER_IMAGE     — supervisor mode only; immutable image used for fresh job containers
 #   RUNNER_CHILD_MOUNT_SOCK — supervisor mode only; explicitly mount Docker into job containers
@@ -517,6 +520,29 @@ attest_host_capacity() {
   run_memory_admission_check || return 1
 }
 
+# Refuses to start against a work root another live runner process already holds. Two
+# runner processes pointed at the same absolute --work directory (a misconfigured host
+# bind mount, a copy-pasted RUNNER_DIR) let one job's actions/checkout delete or rewrite
+# files a concurrent job on the other runner still has open, corrupting both checkouts —
+# see issue #155. The lock is acquired on fd 9, held open for this process's entire
+# lifetime, and releases automatically however the process exits.
+claim_work_root() {
+  local root lockfile holder
+  root="$(pwd)/${RUNNER_WORKDIR}"
+  mkdir -p "${root}" || {
+    echo "Cannot create runner work root ${root}." >&2
+    return 1
+  }
+  lockfile="${root}/.gha-work-root.lock"
+  exec 9>>"${lockfile}"
+  if ! flock -n 9; then
+    holder="$(tr '\n' ' ' < "${lockfile}" 2>/dev/null)"
+    echo "Work root ${root} is already claimed by another active runner process (${holder}). Give each concurrently running runner a unique RUNNER_DIR/RUNNER_WORKDIR — never point two runner processes at the same work root." >&2
+    return 1
+  fi
+  printf 'runner=%s pid=%s\n' "${RUNNER_NAME:-unknown}" "$$" > "${lockfile}"
+}
+
 attest_ci_runner() {
   echo "Attesting required ci runner capabilities..."
   run_admission_check "GitHub CLI" gh --version || return 1
@@ -659,6 +685,7 @@ main() {
     echo "RUNNER_EPHEMERAL requires a fresh disposable container. Use the gha supervisor or set RUNNER_FRESH_CONTAINER=1 only from an external one-job container orchestrator." >&2
     return 1
   fi
+  claim_work_root || return 1
 
   # Advertising "ci" is a capability claim. Prove the complete contract before any
   # registration credential is minted or config.sh can make the runner schedulable.
