@@ -14,5 +14,5 @@ reviewed required-check identities and promotion-retry workflow set without a
 repository-specific `runner_labels` override. Closes the remaining adoption
 step named in Verjson/.github#676.
 
-A controlled documentation-only pull request verifies that this public caller's
-terminal continuation remains on its fixed GitHub-hosted route after the cutover.
+A controlled documentation-only pull request will verify this public caller's fixed
+GitHub-hosted terminal route only if that continuation executes and merges the PR.
