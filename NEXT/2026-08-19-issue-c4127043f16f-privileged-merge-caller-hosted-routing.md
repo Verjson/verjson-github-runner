@@ -13,3 +13,6 @@ ADR 0118's admitted hosted-lane policy. The generated callers retain the
 reviewed required-check identities and promotion-retry workflow set without a
 repository-specific `runner_labels` override. Closes the remaining adoption
 step named in Verjson/.github#676.
+
+A controlled documentation-only pull request will verify this public caller's fixed
+GitHub-hosted terminal route only if that continuation executes and merges the PR.
