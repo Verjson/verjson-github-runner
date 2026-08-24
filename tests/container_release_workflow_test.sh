@@ -6,9 +6,9 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-contract_ref="bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+contract_ref="0d773549e2b4b0af30447bc15ac05d50c04d9712"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
-base_image="ghcr.io/verjson/gha-runner@sha256:d97a218b5c7834f1a34fc4e13760ad16b692504dc79c38f92a1a8bb3b286db85"
+base_image="ghcr.io/verjson/gha-runner@sha256:3343542727e3bd7bef6918281b5c06ef3afacb1ae08cf1c5767cf8a9d3dcfa18"
 
 fail() {
   echo "container release workflow contract: $*" >&2
@@ -19,8 +19,8 @@ fail() {
   || fail "legacy merge-driven stable publication still exists"
 
 for workflow in "${root}"/.github/workflows/*.yml; do
-  if grep -q '^  packages: write$' "${workflow}" \
-    && [[ "${workflow}" != "${candidate}" ]]; then
+  if grep -Eq '^[[:space:]]+packages: write$' "${workflow}" \
+    && [[ "${workflow}" != "${candidate}" && "${workflow}" != "${release}" ]]; then
     fail "competing package publication permission remains in ${workflow}"
   fi
 done
@@ -52,7 +52,7 @@ images = {image["variant"]: image for image in config["images"]}
 assert images.keys() == expected.keys()
 assert len({image["repository"] for image in images.values()}) == len(images)
 
-builder = "Verjson/.github/.github/workflows/container-candidate.yml@" + sys.argv[2]
+builder = "Verjson/.github/.github/workflows/container-candidate-publish.yml@" + sys.argv[2]
 platforms = [
     {"os": "linux", "architecture": "amd64"},
     {"os": "linux", "architecture": "arm64"},
@@ -108,6 +108,14 @@ grep -Fq "container-release.yml@${contract_ref}" "${release}" \
   || fail "release caller does not use the reviewed canonical contract"
 grep -qx '  attestations: write' "${release}" \
   || fail "release caller cannot publish a signed release manifest"
+grep -qx '  packages: write' "${release}" \
+  || fail "release caller cannot promote or retain packages with its job token"
+grep -Fq 'release_app_client_id: ${{ vars.RELEASE_APP_CLIENT_ID }}' "${release}" \
+  || fail "release caller does not pass the role-based App client ID"
+grep -Fq 'release_app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}' "${release}" \
+  || fail "release caller does not pass only the role-based App private key"
+! grep -Eq 'secrets: inherit|release-token:' "${release}" \
+  || fail "release caller broadens or restores the legacy release credential"
 [[ -x "${root}/scripts/container_attestation_verify.py" ]] \
   || fail "release caller lacks the generated attestation verifier"
 

@@ -10,13 +10,15 @@ permissions:
   attestations: write
   contents: read
   id-token: write
+  packages: write
 jobs:
   release:
-    uses: Verjson/.github/.github/workflows/container-release.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4
+    uses: Verjson/.github/.github/workflows/container-release.yml@0d773549e2b4b0af30447bc15ac05d50c04d9712
     with:
       version: ${{ inputs.version }}
       candidate-manifest: ${{ inputs.candidate-manifest }}
       config-path: container-candidate.json
-      contract-ref: bced83b95e17c65ed4500c83756e2638f7dbb9d4
+      contract-ref: 0d773549e2b4b0af30447bc15ac05d50c04d9712
+      release_app_client_id: ${{ vars.RELEASE_APP_CLIENT_ID }}
     secrets:
-      release-token: ${{ secrets.VERJSON_RELEASE_TOKEN }}
+      release_app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
