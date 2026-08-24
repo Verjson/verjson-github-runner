@@ -1,6 +1,6 @@
 ---
 date: 2026-08-24
-issue: 163
+issue: 165
 title: Refresh the standalone derived-image base digest
 ---
 
