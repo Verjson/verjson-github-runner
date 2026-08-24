@@ -15,7 +15,7 @@
       ],
       "provenance": {
         "predicateType": "https://slsa.dev/provenance/v1",
-        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+      "builderIdentity": "Verjson/.github/.github/workflows/container-candidate-publish.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d"
       }
     },
     {
@@ -30,7 +30,7 @@
       ],
       "provenance": {
         "predicateType": "https://slsa.dev/provenance/v1",
-        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate-publish.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d"
       }
     },
     {
@@ -45,7 +45,7 @@
       ],
       "provenance": {
         "predicateType": "https://slsa.dev/provenance/v1",
-        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate-publish.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d"
       }
     },
     {
@@ -60,7 +60,7 @@
       ],
       "provenance": {
         "predicateType": "https://slsa.dev/provenance/v1",
-        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate-publish.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d"
       }
     },
     {
@@ -75,7 +75,7 @@
       ],
       "provenance": {
         "predicateType": "https://slsa.dev/provenance/v1",
-        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate-publish.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d"
       }
     },
     {
@@ -90,7 +90,7 @@
       ],
       "provenance": {
         "predicateType": "https://slsa.dev/provenance/v1",
-        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate.yml@bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+        "builderIdentity": "Verjson/.github/.github/workflows/container-candidate-publish.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d"
       }
     }
   ]

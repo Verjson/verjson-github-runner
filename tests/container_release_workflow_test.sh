@@ -6,7 +6,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-contract_ref="bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+contract_ref="b4b5cb7e8ccf9eede35516eafbbe62179042254d"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 base_image="ghcr.io/verjson/gha-runner@sha256:d97a218b5c7834f1a34fc4e13760ad16b692504dc79c38f92a1a8bb3b286db85"
 
@@ -52,7 +52,7 @@ images = {image["variant"]: image for image in config["images"]}
 assert images.keys() == expected.keys()
 assert len({image["repository"] for image in images.values()}) == len(images)
 
-builder = "Verjson/.github/.github/workflows/container-candidate.yml@" + sys.argv[2]
+builder = "Verjson/.github/.github/workflows/container-candidate-publish.yml@" + sys.argv[2]
 platforms = [
     {"os": "linux", "architecture": "amd64"},
     {"os": "linux", "architecture": "arm64"},
