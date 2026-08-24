@@ -6,7 +6,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-contract_ref="b4b5cb7e8ccf9eede35516eafbbe62179042254d"
+contract_ref="0d773549e2b4b0af30447bc15ac05d50c04d9712"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 base_image="ghcr.io/verjson/gha-runner@sha256:3343542727e3bd7bef6918281b5c06ef3afacb1ae08cf1c5767cf8a9d3dcfa18"
 
@@ -19,8 +19,8 @@ fail() {
   || fail "legacy merge-driven stable publication still exists"
 
 for workflow in "${root}"/.github/workflows/*.yml; do
-  if grep -q '^  packages: write$' "${workflow}" \
-    && [[ "${workflow}" != "${candidate}" ]]; then
+  if grep -Eq '^[[:space:]]+packages: write$' "${workflow}" \
+    && [[ "${workflow}" != "${candidate}" && "${workflow}" != "${release}" ]]; then
     fail "competing package publication permission remains in ${workflow}"
   fi
 done
@@ -108,6 +108,14 @@ grep -Fq "container-release.yml@${contract_ref}" "${release}" \
   || fail "release caller does not use the reviewed canonical contract"
 grep -qx '  attestations: write' "${release}" \
   || fail "release caller cannot publish a signed release manifest"
+grep -qx '  packages: write' "${release}" \
+  || fail "release caller cannot promote or retain packages with its job token"
+grep -Fq 'release_app_client_id: ${{ vars.RELEASE_APP_CLIENT_ID }}' "${release}" \
+  || fail "release caller does not pass the role-based App client ID"
+grep -Fq 'release_app_private_key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}' "${release}" \
+  || fail "release caller does not pass only the role-based App private key"
+! grep -Eq 'secrets: inherit|release-token:' "${release}" \
+  || fail "release caller broadens or restores the legacy release credential"
 [[ -x "${root}/scripts/container_attestation_verify.py" ]] \
   || fail "release caller lacks the generated attestation verifier"
 

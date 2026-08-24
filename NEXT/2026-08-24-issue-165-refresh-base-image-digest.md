@@ -1,6 +1,7 @@
 ---
 date: 2026-08-24
 issue: 165
+impact: patch
 title: Refresh the standalone derived-image base digest
 ---
 
