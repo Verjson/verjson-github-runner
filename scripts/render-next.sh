@@ -8,7 +8,7 @@
 # render locally is what CI validates.
 set -euo pipefail
 
-CONTRACT_REF="bced83b95e17c65ed4500c83756e2638f7dbb9d4"
+CONTRACT_REF="b4b5cb7e8ccf9eede35516eafbbe62179042254d"
 CONTRACT_SHA256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 
 # --as-released is the only flag that passes through. It shows what a release

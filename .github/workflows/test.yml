@@ -40,6 +40,8 @@ jobs:
         run: bash tests/work_root_isolation_test.sh
       - name: Canonical changelog contract holds
         run: bash scripts/changelog-contract.test.sh
+      - name: Canonical CI credentials are organization-neutral
+        run: bash tests/neutral_ci_credentials_test.sh
 
   go-tests:
     runs-on: ubuntu-latest

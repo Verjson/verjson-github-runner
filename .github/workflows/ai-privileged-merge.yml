@@ -1,6 +1,6 @@
 # GENERATED FILE — do not edit by hand.
 # Regenerate with:
-#   scripts/gen-privileged-merge-caller.sh c4250f4dae20315ce3472525115c8f0904385f88 \[\{\"name\":\"shell-tests\"\,\"app_id\":15368\,\"workflow_id\":319611670\,\"workflow_path\":\".github/workflows/test.yml\"\}\,\{\"name\":\"generated-artifacts\ /\ validate\"\,\"app_id\":15368\,\"workflow_id\":325336751\,\"workflow_path\":\".github/workflows/changelog.yml\"\}\] > .github/workflows/ai-privileged-merge.yml
+#   scripts/gen-privileged-merge-caller.sh b4b5cb7e8ccf9eede35516eafbbe62179042254d \[\{\"name\":\"shell-tests\"\,\"app_id\":15368\,\"workflow_id\":319611670\,\"workflow_path\":\".github/workflows/test.yml\"\}\,\{\"name\":\"generated-artifacts\ /\ validate\"\,\"app_id\":15368\,\"workflow_id\":325336751\,\"workflow_path\":\".github/workflows/changelog.yml\"\}\] > .github/workflows/ai-privileged-merge.yml
 #
 # Thin caller for the canonical privileged merge (Verjson/.github). All trust
 # logic lives there; nothing here may re-implement it.
@@ -44,7 +44,7 @@ jobs:
   # "<caller job> / <callee job>" and both workflows exclude that shape.
   # Renaming it makes the gate wait on its own continuation.
   privileged_merge:
-    uses: Verjson/.github/.github/workflows/ai-privileged-merge.yml@c4250f4dae20315ce3472525115c8f0904385f88
+    uses: Verjson/.github/.github/workflows/ai-privileged-merge.yml@b4b5cb7e8ccf9eede35516eafbbe62179042254d
     # Explicit rather than `inherit`: the caller grants only the terminal
     # merge App private key to the immutable canonical contract revision.
     secrets:
@@ -58,5 +58,5 @@ jobs:
       review_policy: ${{ inputs.review_policy }}
       source_run_id: ${{ inputs.source_run_id }}
       required_checks: '[{"name":"shell-tests","app_id":15368,"workflow_id":319611670,"workflow_path":".github/workflows/test.yml"},{"name":"generated-artifacts / validate","app_id":15368,"workflow_id":325336751,"workflow_path":".github/workflows/changelog.yml"}]'
-      privileged_lane: ${{ vars.VERJSON_LANE_PRIVILEGED }}
+      privileged_lane: ${{ vars.CI_LANE_PRIVILEGED }}
       merge_app_client_id: ${{ vars.MERGE_APP_CLIENT_ID }}
