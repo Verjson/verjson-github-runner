@@ -6,7 +6,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-contract_ref="40446f8d34a135bf6e15e9274aa00317d3f20f18"
+contract_ref="8e41acc640282234bfb82559d31463037e001a60"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 base_image="ghcr.io/verjson/gha-runner@sha256:3343542727e3bd7bef6918281b5c06ef3afacb1ae08cf1c5767cf8a9d3dcfa18"
 
