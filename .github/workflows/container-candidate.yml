@@ -1,7 +1,7 @@
 # GENERATED FILE — do not edit by hand.
-# Contract: 40446f8d34a135bf6e15e9274aa00317d3f20f18
+# Contract: 8e41acc640282234bfb82559d31463037e001a60
 # Regenerate with:
-#   scripts/gen-container-candidate.sh workflow 40446f8d34a135bf6e15e9274aa00317d3f20f18 container-candidate.json > .github/workflows/container-candidate.yml
+#   scripts/gen-container-candidate.sh workflow 8e41acc640282234bfb82559d31463037e001a60 container-candidate.json > .github/workflows/container-candidate.yml
 name: immutable container candidate
 
 on:
@@ -16,11 +16,12 @@ jobs:
       actions: read
       contents: read
 
-    uses: Verjson/.github/.github/workflows/container-candidate.yml@40446f8d34a135bf6e15e9274aa00317d3f20f18
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@8e41acc640282234bfb82559d31463037e001a60
     with:
       config-path: container-candidate.json
-      contract-ref: 40446f8d34a135bf6e15e9274aa00317d3f20f18
+      contract-ref: 8e41acc640282234bfb82559d31463037e001a60
       acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
+      retry-sha256: 4a11c930f31cc9a07c3b5236511c3545a215c60ba93657e7bc473f7c2ad8fa62
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -30,9 +31,10 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    uses: Verjson/.github/.github/workflows/container-candidate-publish.yml@40446f8d34a135bf6e15e9274aa00317d3f20f18
+    uses: Verjson/.github/.github/workflows/container-candidate-publish.yml@8e41acc640282234bfb82559d31463037e001a60
     with:
       config-path: container-candidate.json
-      contract-ref: 40446f8d34a135bf6e15e9274aa00317d3f20f18
+      contract-ref: 8e41acc640282234bfb82559d31463037e001a60
       acquisition-sha256: 198f7ddd7e628b678f6225c9f22039c5bfc49c1599d9ca169cc15130a3001ab0
+      retry-sha256: 4a11c930f31cc9a07c3b5236511c3545a215c60ba93657e7bc473f7c2ad8fa62
 
