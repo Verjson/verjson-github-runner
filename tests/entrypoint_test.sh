@@ -1710,6 +1710,42 @@ echo "Test 52: bridge admission rejects mutable probe images"
   assert_file_absent "${TMP_DIR}/mutable_probe_started" "Rejects the image before Docker can pull or start it"
 )
 
+# -----------------------------------------------------------------------------
+# Test 53: interruption after probe startup still forces teardown
+# -----------------------------------------------------------------------------
+echo "Test 53: bridge admission cleans up when interrupted after startup"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker_log="${TMP_DIR}/interrupted_bridge_docker.log"
+  RUNNER_BRIDGE_PROBE_IMAGE="sha256:$(printf 'b%.0s' {1..64})"
+  HOSTNAME="runner-interrupted"
+
+  docker() {
+    echo "$*" >> "${docker_log}"
+    case "$1" in
+      run) return 0 ;;
+      inspect) echo "172.17.0.24" ;;
+    esac
+  }
+  curl() {
+    kill -TERM "${BASHPID}"
+  }
+  trap ':' TERM
+  caller_term_trap="$(trap -p TERM)"
+
+  set +e
+  attest_general_bridge_routing "self-hosted,general" >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Propagates interruption as a failed admission"
+  assert_contains "rm -f" "$(tail -n 1 "${docker_log}")" \
+    "Forces removal from the isolated EXIT trap after interruption"
+  assert_eq "${caller_term_trap}" "$(trap -p TERM)" \
+    "Leaves the caller's pre-existing signal trap unchanged"
+  trap - TERM
+)
+
 echo "-----------------------------------------------------------------------------"
 passed_count=$(find "${TMP_DIR}" -name 'passed_*' | wc -l | tr -d ' ')
 failed_count=$(find "${TMP_DIR}" -name 'failed_*' | wc -l | tr -d ' ')

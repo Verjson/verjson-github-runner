@@ -526,8 +526,7 @@ attest_host_capacity() {
 # passed the Docker CLI admission and then failed every such job. Start the sibling from
 # the already-local runner image so admission never pulls mutable or unreviewed bytes.
 attest_general_bridge_routing() {
-  local claimed_labels="$1" image probe_name probe_ip probe_started=0 reachable=1 octet
-  local octets=()
+  local claimed_labels="$1" image probe_name
 
   labels_include general "${claimed_labels}" || return 0
 
@@ -545,41 +544,50 @@ attest_general_bridge_routing() {
 
   probe_name="gha-bridge-admission-${HOSTNAME:-runner}-$$"
   probe_name="$(printf '%s' "${probe_name}" | tr -cd '[:alnum:]_.-')"
-  docker rm -f "${probe_name}" >/dev/null 2>&1 || true
-  if docker run -d --rm --name "${probe_name}" --network bridge \
-      --entrypoint python3 "${image}" -m http.server 18080 --bind 0.0.0.0 >/dev/null; then
-    probe_started=1
-  else
-    echo "General runner admission failed: could not start the disposable Docker bridge probe." >&2
-    return 1
-  fi
+  (
+    local probe_ip reachable=1 octet
+    local octets=()
 
-  probe_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "bridge"}}{{.IPAddress}}{{end}}' "${probe_name}" 2>/dev/null)" || true
-  if [[ "${probe_ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
-    IFS='.' read -r -a octets <<< "${probe_ip}"
-    for octet in "${octets[@]}"; do
-      (( 10#${octet} <= 255 )) || probe_ip=""
-    done
-  else
-    probe_ip=""
-  fi
+    # Keep lifecycle traps inside a subshell: EXIT then covers errors and signals after
+    # startup without replacing main's registration cleanup traps. Signal handlers exit
+    # explicitly so EXIT performs the single idempotent forced removal.
+    trap 'docker rm -f "${probe_name}" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
-  if [[ -n "${probe_ip}" ]]; then
-    for _ in {1..20}; do
-      if curl --noproxy '*' --fail --silent --show-error \
-          --connect-timeout 1 --max-time 2 "http://${probe_ip}:18080/" >/dev/null; then
-        reachable=0
-        break
-      fi
-      sleep 0.25
-    done
-  fi
+    docker rm -f "${probe_name}" >/dev/null 2>&1 || true
+    if ! docker run -d --rm --name "${probe_name}" --network bridge \
+        --entrypoint python3 "${image}" -m http.server 18080 --bind 0.0.0.0 >/dev/null; then
+      echo "General runner admission failed: could not start the disposable Docker bridge probe." >&2
+      exit 1
+    fi
 
-  (( probe_started == 0 )) || docker rm -f "${probe_name}" >/dev/null 2>&1 || true
-  if (( reachable != 0 )); then
-    echo "General runner admission failed: this runner cannot reach a sibling container on Docker's bridge network." >&2
-    return 1
-  fi
+    probe_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "bridge"}}{{.IPAddress}}{{end}}' "${probe_name}" 2>/dev/null)" || true
+    if [[ "${probe_ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+      IFS='.' read -r -a octets <<< "${probe_ip}"
+      for octet in "${octets[@]}"; do
+        (( 10#${octet} <= 255 )) || probe_ip=""
+      done
+    else
+      probe_ip=""
+    fi
+
+    if [[ -n "${probe_ip}" ]]; then
+      for _ in {1..20}; do
+        if curl --noproxy '*' --fail --silent --show-error \
+            --connect-timeout 1 --max-time 2 "http://${probe_ip}:18080/" >/dev/null; then
+          reachable=0
+          break
+        fi
+        sleep 0.25
+      done
+    fi
+
+    if (( reachable != 0 )); then
+      echo "General runner admission failed: this runner cannot reach a sibling container on Docker's bridge network." >&2
+      exit 1
+    fi
+  ) || return 1
   echo "General runner Docker bridge routing admission passed."
 }
 
