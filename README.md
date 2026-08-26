@@ -427,6 +427,12 @@ to it, so you can ignore groups entirely unless you want the access control.
   - `RUNNER_LABELS` — comma-separated labels. Advertising the exact `ci` label cannot
     bypass startup admission; advertising exact `pwsh` independently requires working
     PowerShell before registration.
+  - `RUNNER_BRIDGE_PROBE_IMAGE` — immutable, already-local `sha256:<image-id>` used to
+    prove that an exact `general` runner can reach a disposable sibling on Docker's
+    default bridge before any registration credential is consumed. Normally inferred
+    from the current runner container. Tags and repository digest references are rejected
+    so admission cannot pull executable bytes. The sibling is removed after success or
+    failure; a quarantined host must not regain `general` until this admission passes.
   - `RUNNER_MIN_MEMORY_MB` — RAM+swap a host must offer before it may register
     (defaults to `6144`). Unlike the label checks above this is proven for **every**
     runner, because memory exhaustion is not a capability claim: a host that cannot
@@ -444,6 +450,7 @@ to it, so you can ignore groups entirely unless you want the access control.
     `kernel.dmesg_restrict=1`; a `dmesg` probe there fails silently and reports a
     just-killed host as healthy. When even the counter is unreadable the log says the
     post-mortem is unavailable rather than staying quiet.
+
 - **Docker-in-CI:** the base image already includes the Docker CLI + buildx + compose
   plugins. To let workflows use them, mount the host socket at run time
   (`-v /var/run/docker.sock:/var/run/docker.sock`, or uncomment it in

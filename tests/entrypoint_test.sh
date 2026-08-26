@@ -1600,6 +1600,7 @@ echo "Test 48: main claims the work root before token resolution"
   RUNNER_LABELS="self-hosted,general"
 
   attest_host_capacity() { echo "capacity" >> "${order_log}"; }
+  attest_general_bridge_routing() { echo "bridge" >> "${order_log}"; }
   consume_github_pat() { echo "consume-pat" >> "${order_log}"; }
   claim_work_root() { echo "claim" >> "${order_log}"; return 1; }
   resolve_token() { echo "resolve-token" >> "${order_log}"; }
@@ -1611,8 +1612,138 @@ echo "Test 48: main claims the work root before token resolution"
   set -e
 
   assert_eq "1" "${status}" "A refused work-root claim fails main before registration"
-  assert_eq $'capacity\nconsume-pat\nclaim' "$(< "${order_log}")" \
-    "Claims the work root before attesting labels or resolving a token"
+  assert_eq $'capacity\nbridge\nconsume-pat\nclaim' "$(< "${order_log}")" \
+    "Claims the work root after host admission but before label tools or token resolution"
+)
+
+# -----------------------------------------------------------------------------
+# Test 49: a general runner proves Docker bridge routing before credentials
+# -----------------------------------------------------------------------------
+echo "Test 49: general bridge routing is proven before any credential is touched"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  order_log="${TMP_DIR}/bridge_order.log"
+  RUNNER_LABELS="self-hosted,general"
+  GITHUB_URL="https://github.com/Verjson"
+
+  attest_host_capacity() { echo "capacity" >> "${order_log}"; }
+  attest_general_bridge_routing() { echo "bridge" >> "${order_log}"; return 1; }
+  consume_github_pat() { echo "consume-pat" >> "${order_log}"; }
+  resolve_token() { echo "resolve-token" >> "${order_log}"; }
+
+  set +e
+  main >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "A bridge-isolated general host fails before registering"
+  assert_eq $'capacity\nbridge' "$(< "${order_log}")" \
+    "Rejects the host before consuming a PAT or resolving a registration token"
+)
+
+# -----------------------------------------------------------------------------
+# Test 50: bridge admission reaches a sibling and always removes the probe
+# -----------------------------------------------------------------------------
+echo "Test 50: bridge admission reaches and removes an exact sibling probe"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker_log="${TMP_DIR}/bridge_docker.log"
+  curl_log="${TMP_DIR}/bridge_curl.log"
+  RUNNER_BRIDGE_PROBE_IMAGE="sha256:$(printf 'a%.0s' {1..64})"
+  RUNNER_NAME="gha-general-4"
+  HOSTNAME="runner-container"
+
+  docker() {
+    echo "$*" >> "${docker_log}"
+    case "$1" in
+      run) echo "probe-container-id" ;;
+      inspect) echo "172.17.0.23" ;;
+    esac
+  }
+  curl() {
+    echo "$*" >> "${curl_log}"
+    return 0
+  }
+  sleep() { :; }
+
+  attest_general_bridge_routing "self-hosted, General "
+
+  assert_contains "run -d --rm --name" "$(< "${docker_log}")" \
+    "Starts a disposable sibling from the exact configured image"
+  assert_contains "--network bridge --entrypoint python3 ${RUNNER_BRIDGE_PROBE_IMAGE}" \
+    "$(< "${docker_log}")" "Pins the probe to Docker's bridge and a non-runner entrypoint"
+  assert_contains "http://172.17.0.23:18080/" "$(< "${curl_log}")" \
+    "Tests the sibling's bridge address rather than host loopback"
+  assert_contains "rm -f" "$(< "${docker_log}")" "Removes the disposable probe after success"
+)
+
+# -----------------------------------------------------------------------------
+# Test 51: labels that merely contain general do not claim bridge capability
+# -----------------------------------------------------------------------------
+echo "Test 51: bridge admission uses an exact case-insensitive general label"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker() { touch "${TMP_DIR}/unexpected_bridge_probe"; return 1; }
+
+  attest_general_bridge_routing "self-hosted,general-purpose"
+
+  assert_file_absent "${TMP_DIR}/unexpected_bridge_probe" \
+    "Does not impose the general-lane contract on substring labels"
+)
+
+# -----------------------------------------------------------------------------
+# Test 52: bridge admission cannot pull a mutable probe image
+# -----------------------------------------------------------------------------
+echo "Test 52: bridge admission rejects mutable probe images"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  RUNNER_BRIDGE_PROBE_IMAGE="ghcr.io/verjson/gha-runner:latest"
+  docker() { touch "${TMP_DIR}/mutable_probe_started"; return 0; }
+
+  set +e
+  output="$(attest_general_bridge_routing "self-hosted,general" 2>&1)"
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Fails closed on a mutable bridge probe image"
+  assert_contains "immutable sha256 image ID" "${output}" "Explains the immutable local-image contract"
+  assert_file_absent "${TMP_DIR}/mutable_probe_started" "Rejects the image before Docker can pull or start it"
+)
+
+# -----------------------------------------------------------------------------
+# Test 53: interruption after probe startup still forces teardown
+# -----------------------------------------------------------------------------
+echo "Test 53: bridge admission cleans up when interrupted after startup"
+(
+  source "${REPO_ROOT}/entrypoint.sh"
+  docker_log="${TMP_DIR}/interrupted_bridge_docker.log"
+  RUNNER_BRIDGE_PROBE_IMAGE="sha256:$(printf 'b%.0s' {1..64})"
+  HOSTNAME="runner-interrupted"
+
+  docker() {
+    echo "$*" >> "${docker_log}"
+    case "$1" in
+      run) return 0 ;;
+      inspect) echo "172.17.0.24" ;;
+    esac
+  }
+  curl() {
+    kill -TERM "${BASHPID}"
+  }
+  trap ':' TERM
+  caller_term_trap="$(trap -p TERM)"
+
+  set +e
+  attest_general_bridge_routing "self-hosted,general" >/dev/null 2>&1
+  status=$?
+  set -e
+
+  assert_eq "1" "${status}" "Propagates interruption as a failed admission"
+  assert_contains "rm -f" "$(tail -n 1 "${docker_log}")" \
+    "Forces removal from the isolated EXIT trap after interruption"
+  assert_eq "${caller_term_trap}" "$(trap -p TERM)" \
+    "Leaves the caller's pre-existing signal trap unchanged"
+  trap - TERM
 )
 
 echo "-----------------------------------------------------------------------------"

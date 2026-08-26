@@ -520,6 +520,77 @@ attest_host_capacity() {
   run_memory_admission_check || return 1
 }
 
+# A general runner executes database-backed jobs whose service containers live on the
+# host daemon's default bridge. Merely reaching the daemon does not prove that this
+# runner container can route back to a sibling on that bridge (Verjson/.github#1093): a divergent host
+# passed the Docker CLI admission and then failed every such job. Start the sibling from
+# the already-local runner image so admission never pulls mutable or unreviewed bytes.
+attest_general_bridge_routing() {
+  local claimed_labels="$1" image probe_name
+
+  labels_include general "${claimed_labels}" || return 0
+
+  image="${RUNNER_BRIDGE_PROBE_IMAGE:-}"
+  if [[ -z "${image}" ]]; then
+    image="$(docker inspect --format '{{.Image}}' "${HOSTNAME:-}" 2>/dev/null)" || {
+      echo "General runner admission failed: set RUNNER_BRIDGE_PROBE_IMAGE to an already-local runner image when the current container image cannot be resolved." >&2
+      return 1
+    }
+  fi
+  [[ "${image}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "General runner admission failed: the bridge probe image must be an already-local immutable sha256 image ID." >&2
+    return 1
+  }
+
+  probe_name="gha-bridge-admission-${HOSTNAME:-runner}-$$"
+  probe_name="$(printf '%s' "${probe_name}" | tr -cd '[:alnum:]_.-')"
+  (
+    local probe_ip reachable=1 octet
+    local octets=()
+
+    # Keep lifecycle traps inside a subshell: EXIT then covers errors and signals after
+    # startup without replacing main's registration cleanup traps. Signal handlers exit
+    # explicitly so EXIT performs the single idempotent forced removal.
+    trap 'docker rm -f "${probe_name}" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    docker rm -f "${probe_name}" >/dev/null 2>&1 || true
+    if ! docker run -d --rm --name "${probe_name}" --network bridge \
+        --entrypoint python3 "${image}" -m http.server 18080 --bind 0.0.0.0 >/dev/null; then
+      echo "General runner admission failed: could not start the disposable Docker bridge probe." >&2
+      exit 1
+    fi
+
+    probe_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "bridge"}}{{.IPAddress}}{{end}}' "${probe_name}" 2>/dev/null)" || true
+    if [[ "${probe_ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+      IFS='.' read -r -a octets <<< "${probe_ip}"
+      for octet in "${octets[@]}"; do
+        (( 10#${octet} <= 255 )) || probe_ip=""
+      done
+    else
+      probe_ip=""
+    fi
+
+    if [[ -n "${probe_ip}" ]]; then
+      for _ in {1..20}; do
+        if curl --noproxy '*' --fail --silent --show-error \
+            --connect-timeout 1 --max-time 2 "http://${probe_ip}:18080/" >/dev/null; then
+          reachable=0
+          break
+        fi
+        sleep 0.25
+      done
+    fi
+
+    if (( reachable != 0 )); then
+      echo "General runner admission failed: this runner cannot reach a sibling container on Docker's bridge network." >&2
+      exit 1
+    fi
+  ) || return 1
+  echo "General runner Docker bridge routing admission passed."
+}
+
 # Refuses to start against a work root another live runner process already holds. Two
 # runner processes pointed at the same absolute --work directory (a misconfigured host
 # bind mount, a copy-pasted RUNNER_DIR) let one job's actions/checkout delete or rewrite
@@ -662,9 +733,10 @@ main() {
   # ahead of consume_github_pat: that read destroys the one-use PAT FIFO, so proving
   # capacity afterwards would make a rejected host re-stage its secret before retrying.
   attest_host_capacity || return 1
+  initialize_runner_labels || return 1
+  attest_general_bridge_routing "${RUNNER_LABELS}" || return 1
   consume_github_pat || return 1
   if [[ "${1:-}" == "admit" ]]; then
-    initialize_runner_labels || return 1
     attest_runner_labels "${RUNNER_LABELS}"
     return $?
   fi
@@ -677,7 +749,6 @@ main() {
   cd "${RUNNER_DIR:-/home/runner/actions-runner}"
 
   RUNNER_NAME="${RUNNER_NAME:-$(hostname)}"
-  initialize_runner_labels || return 1
   RUNNER_GROUP="${RUNNER_GROUP:-Default}"
   RUNNER_WORKDIR="${RUNNER_WORKDIR:-_work}"
   normalize_ephemeral_mode || return 1
