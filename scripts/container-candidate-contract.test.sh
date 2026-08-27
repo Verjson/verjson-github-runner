@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GENERATED FILE — do not edit by hand.
-# Contract: 880230cec2bfe63f2f4e759f27661ea9427a279c
+# Contract: a55a906d46464f83388af089842bc05e8a7e230c
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 caller="$root/.github/workflows/container-candidate.yml"
@@ -9,11 +9,11 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 
 [ -f "$caller" ] || fail "generated caller is missing"
 [ -f "$validator" ] || fail "generated validator is missing"
-grep -qx '# Contract: 880230cec2bfe63f2f4e759f27661ea9427a279c' "$caller" || fail "caller contract pin differs"
-grep -qx '# Contract: 880230cec2bfe63f2f4e759f27661ea9427a279c' "$validator" || fail "validator contract pin differs"
-[ "$(grep -c 'uses: Verjson/.github/.github/workflows/container-candidate.yml@880230cec2bfe63f2f4e759f27661ea9427a279c' "$caller")" -eq 1 ] || fail "validation does not use the pinned read-only reusable workflow"
-[ "$(grep -c 'uses: Verjson/.github/.github/workflows/container-candidate-publish.yml@880230cec2bfe63f2f4e759f27661ea9427a279c' "$caller")" -eq 1 ] || fail "publication does not use the pinned publication reusable workflow"
-[ "$(grep -c 'contract-ref: 880230cec2bfe63f2f4e759f27661ea9427a279c' "$caller")" -eq 2 ] || fail "caller does not pass the shared pin to both event paths"
+grep -qx '# Contract: a55a906d46464f83388af089842bc05e8a7e230c' "$caller" || fail "caller contract pin differs"
+grep -qx '# Contract: a55a906d46464f83388af089842bc05e8a7e230c' "$validator" || fail "validator contract pin differs"
+[ "$(grep -c 'uses: Verjson/.github/.github/workflows/container-candidate.yml@a55a906d46464f83388af089842bc05e8a7e230c' "$caller")" -eq 1 ] || fail "validation does not use the pinned read-only reusable workflow"
+[ "$(grep -c 'uses: Verjson/.github/.github/workflows/container-candidate-publish.yml@a55a906d46464f83388af089842bc05e8a7e230c' "$caller")" -eq 1 ] || fail "publication does not use the pinned publication reusable workflow"
+[ "$(grep -c 'contract-ref: a55a906d46464f83388af089842bc05e8a7e230c' "$caller")" -eq 2 ] || fail "caller does not pass the shared pin to both event paths"
 [ "$(grep -c 'acquisition-sha256: 942b5d55cc441cd54ae11a71b85c5538ce8d091092ef32f3950aad0ca0078ef8' "$caller")" -eq 2 ] || fail "caller does not pin the acquisition implementation digest for both event paths"
 [ "$(grep -c 'retry-sha256: 4a11c930f31cc9a07c3b5236511c3545a215c60ba93657e7bc473f7c2ad8fa62' "$caller")" -eq 2 ] || fail "both event paths do not pin the retry verifier digest"
 [ "$(grep -c '^      actions: read$' "$caller")" -eq 2 ] || fail "both event paths require Actions reads"
@@ -23,8 +23,8 @@ grep -qx '# Contract: 880230cec2bfe63f2f4e759f27661ea9427a279c' "$validator" || 
 [ "$(grep -c '^      id-token: write$' "$caller")" -eq 1 ] || fail "only publication may mint attestation identity"
 grep -q "if: github.event_name == 'pull_request'" "$caller" || fail "validation is not restricted to pull requests"
 grep -q "if: github.event_name == 'push' && github.ref == 'refs/heads/main'" "$caller" || fail "publication is not restricted to trusted main pushes"
-[ "$(sha256sum "$caller" | cut -d' ' -f1)" = "b9b1c1b66e0dc65e69e3dac29cff099e859f50a8d00d486608c0eeb649df0acb" ] || fail "generated caller was edited"
-[ "$(sha256sum "$validator" | cut -d' ' -f1)" = "b8d380c17a369f4f9f43defb50191ec9901c39b6664b6f716d65bd5a14fb5121" ] || fail "generated validator was edited"
+[ "$(sha256sum "$caller" | cut -d' ' -f1)" = "b560ef7715a47f16dde1a24c7c37afbfe834744acf47bfb802dc2d2928efa313" ] || fail "generated caller was edited"
+[ "$(sha256sum "$validator" | cut -d' ' -f1)" = "99d880281c7e5d4e6e7d1caf4be6873e88b46434f99faad0623611f14b095efc" ] || fail "generated validator was edited"
 if grep -Eq 'secrets: inherit|registry-namespace:|environment:' "$caller"; then
   fail "caller may not inherit credentials or inject registry namespaces or environments"
 fi
