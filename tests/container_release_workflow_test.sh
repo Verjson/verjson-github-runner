@@ -6,8 +6,10 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-candidate_contract_ref="e7140150d29774cbf77be8bc1a764b4c393842f7"
-release_contract_ref="e7140150d29774cbf77be8bc1a764b4c393842f7"
+candidate_validator="${root}/scripts/container_candidate_validate.py"
+manifest_validator="${root}/scripts/container_release_manifest.py"
+candidate_contract_ref="4704880d1a4234dd70d06ee03be0dc8e389cee5c"
+release_contract_ref="4704880d1a4234dd70d06ee03be0dc8e389cee5c"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 release_manifest="$(find "${root}/RELEASES/containers" -maxdepth 1 -type f -name 'v*.json' -print | sort -V | tail -n 1)"
 [[ -n "${release_manifest}" ]] || {
@@ -38,6 +40,9 @@ fail() {
 
 [[ ! -e "${root}/.github/workflows/publish-images.yml" ]] \
   || fail "legacy merge-driven stable publication still exists"
+
+cmp -s "${candidate_validator}" "${manifest_validator}" \
+  || fail "candidate and release manifest validators do not share one generated contract"
 
 for workflow in "${root}"/.github/workflows/*.yml; do
   if grep -Eq '^[[:space:]]+packages: write$' "${workflow}" \
