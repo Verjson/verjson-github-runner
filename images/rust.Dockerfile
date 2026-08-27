@@ -1,7 +1,7 @@
 # Rust runner: rustup toolchain + cargo + clippy + rustfmt, plus the usual native build deps.
 # Build:  docker build -f images/rust.Dockerfile -t gha-runner:rust .
 # Standalone builds use the public base; canonical publication overrides its exact digest.
-ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner@sha256:3343542727e3bd7bef6918281b5c06ef3afacb1ae08cf1c5767cf8a9d3dcfa18
+ARG VERJSON_BASE_IMAGE=ghcr.io/verjson/gha-runner@sha256:d1a77bc538ffd3b07f02c7495e28ca11ce020ad676063ab660b420afb1f4b23b
 FROM ${VERJSON_BASE_IMAGE}
 
 USER root
