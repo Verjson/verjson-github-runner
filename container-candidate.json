@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repository": "Verjson/verjson-github-runner",
   "registryNamespace": "ghcr.io/verjson",
-  "nextStableVersion": "0.2.0",
+  "nextStableVersion": "0.2.1",
   "images": [
     {
       "variant": "base",
