@@ -1,7 +1,7 @@
 # GENERATED FILE — do not edit by hand.
-# Contract: 10e182290bcc5050b65f23cda4ab4ef893e65bba
+# Contract: 880230cec2bfe63f2f4e759f27661ea9427a279c
 # Regenerate with:
-#   scripts/gen-container-candidate.sh workflow 10e182290bcc5050b65f23cda4ab4ef893e65bba container-candidate.json > .github/workflows/container-candidate.yml
+#   scripts/gen-container-candidate.sh workflow 880230cec2bfe63f2f4e759f27661ea9427a279c container-candidate.json > .github/workflows/container-candidate.yml
 name: immutable container candidate
 
 on:
@@ -16,10 +16,10 @@ jobs:
       actions: read
       contents: read
 
-    uses: Verjson/.github/.github/workflows/container-candidate.yml@10e182290bcc5050b65f23cda4ab4ef893e65bba
+    uses: Verjson/.github/.github/workflows/container-candidate.yml@880230cec2bfe63f2f4e759f27661ea9427a279c
     with:
       config-path: container-candidate.json
-      contract-ref: 10e182290bcc5050b65f23cda4ab4ef893e65bba
+      contract-ref: 880230cec2bfe63f2f4e759f27661ea9427a279c
       acquisition-sha256: 942b5d55cc441cd54ae11a71b85c5538ce8d091092ef32f3950aad0ca0078ef8
       retry-sha256: 4a11c930f31cc9a07c3b5236511c3545a215c60ba93657e7bc473f7c2ad8fa62
 
@@ -31,10 +31,10 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    uses: Verjson/.github/.github/workflows/container-candidate-publish.yml@10e182290bcc5050b65f23cda4ab4ef893e65bba
+    uses: Verjson/.github/.github/workflows/container-candidate-publish.yml@880230cec2bfe63f2f4e759f27661ea9427a279c
     with:
       config-path: container-candidate.json
-      contract-ref: 10e182290bcc5050b65f23cda4ab4ef893e65bba
+      contract-ref: 880230cec2bfe63f2f4e759f27661ea9427a279c
       acquisition-sha256: 942b5d55cc441cd54ae11a71b85c5538ce8d091092ef32f3950aad0ca0078ef8
       retry-sha256: 4a11c930f31cc9a07c3b5236511c3545a215c60ba93657e7bc473f7c2ad8fa62
 
