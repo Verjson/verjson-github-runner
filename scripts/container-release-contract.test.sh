@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ref='da8a2154b6a3d2109d48cfbd82e153df8a9dedc9'
-printf '%s  %s\n' '2a204a3f5fd565e689c4ed1c7eae51a870ddd1d06238c9f979a41aaaee9a8983' .github/workflows/container-release.yml | sha256sum --check --strict
+ref='e7140150d29774cbf77be8bc1a764b4c393842f7'
+printf '%s  %s\n' 'b08187f0c425f5516f50efe1833a85b5f323100d07b57d6381e2164fe96e12ac' .github/workflows/container-release.yml | sha256sum --check --strict
 grep -Fq "container-release.yml@$ref" .github/workflows/container-release.yml
 grep -Fq "contract-ref: $ref" .github/workflows/container-release.yml
 grep -q "workflow_dispatch:" .github/workflows/container-release.yml
@@ -16,7 +16,7 @@ test -f scripts/container_release_manifest.py
 test -f scripts/container_artifact_extract.py
 test -f scripts/container_attestation_verify.py
 printf '%s  %s\n' 'f4a672502ffb13d83945f473f33de03d9b8fc98ac22a4681739c6856d0194e6a' scripts/container_release_promotion.py | sha256sum --check --strict
-printf '%s  %s\n' 'e90ccd17260294832edeae90ddc57aff80c01aa3dea487aaabd1fb00dd6bae6b' scripts/container_release_manifest.py | sha256sum --check --strict
+printf '%s  %s\n' 'c702f044f515eaeaab7fdd31116c5644c48ad8030b59bb51cb83c5abc83c24c4' scripts/container_release_manifest.py | sha256sum --check --strict
 printf '%s  %s\n' 'f485dcbf63dc15c530399f07cca876f398ab6520e932a2c1eb34deda1fef6748' scripts/container_artifact_extract.py | sha256sum --check --strict
 printf '%s  %s\n' 'b4e4bc5a08ad3e40e430de4d499419d8c91c186ced01d72ab032136eca9a989b' scripts/container_attestation_verify.py | sha256sum --check --strict
 grep -q '^  attestations: write$' .github/workflows/container-release.yml
