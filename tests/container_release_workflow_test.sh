@@ -9,7 +9,27 @@ release="${root}/.github/workflows/container-release.yml"
 candidate_contract_ref="15d9b9927fb7d6e0efd7a8701a28d795d4b9f151"
 release_contract_ref="15d9b9927fb7d6e0efd7a8701a28d795d4b9f151"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
-base_image="ghcr.io/verjson/gha-runner@sha256:3343542727e3bd7bef6918281b5c06ef3afacb1ae08cf1c5767cf8a9d3dcfa18"
+release_manifest="$(find "${root}/RELEASES/containers" -maxdepth 1 -type f -name 'v*.json' -print | sort -V | tail -n 1)"
+[[ -n "${release_manifest}" ]] || {
+  echo "container release workflow contract: no immutable container release manifest exists" >&2
+  exit 1
+}
+base_image="$(python3 - "${release_manifest}" <<'PY'
+import json
+import re
+import sys
+
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+base = [image for image in manifest.get("images", []) if image.get("variant") == "base"]
+if len(base) != 1:
+    raise SystemExit("release manifest must contain exactly one base image")
+repository = base[0].get("repository")
+digest = base[0].get("indexDigest")
+if repository != "ghcr.io/verjson/gha-runner" or not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+    raise SystemExit("release manifest base image is not an immutable canonical reference")
+print(f"{repository}@{digest}")
+PY
+)"
 
 fail() {
   echo "container release workflow contract: $*" >&2
