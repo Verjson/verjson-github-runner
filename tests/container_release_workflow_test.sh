@@ -6,7 +6,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config="${root}/container-candidate.json"
 candidate="${root}/.github/workflows/container-candidate.yml"
 release="${root}/.github/workflows/container-release.yml"
-contract_ref="8e41acc640282234bfb82559d31463037e001a60"
+candidate_contract_ref="ac0a93f63f8e209db5ea679ffc1263ad1897af3b"
+release_contract_ref="ac0a93f63f8e209db5ea679ffc1263ad1897af3b"
 changelog_sha256="9d2866cd11b600fcd8cfa160f9599b4158f6b18f1b538aa6baf450d0b4b7666b"
 base_image="ghcr.io/verjson/gha-runner@sha256:3343542727e3bd7bef6918281b5c06ef3afacb1ae08cf1c5767cf8a9d3dcfa18"
 
@@ -29,7 +30,7 @@ printf '%s  %s\n' "${changelog_sha256}" "${root}/scripts/changelog.py" \
   | sha256sum --check --strict >/dev/null \
   || fail "release changelog engine differs from the pinned canonical implementation"
 
-python3 - "${config}" "${contract_ref}" <<'PY'
+python3 - "${config}" "${candidate_contract_ref}" <<'PY'
 import json
 import sys
 
@@ -84,7 +85,7 @@ grep -qx '    branches: \[main\]' "${candidate}" || fail "candidate push is not 
 grep -qx '  pull_request:' "${candidate}" || fail "pull requests do not exercise candidate builds"
 ! grep -Eq '(^|[^[:alnum:]_-])(latest|stable):|:[0-9]+\.[0-9]+\.[0-9]+' "${candidate}" \
   || fail "candidate caller contains a stable alias"
-grep -Fq "container-candidate.yml@${contract_ref}" "${candidate}" \
+grep -Fq "container-candidate.yml@${candidate_contract_ref}" "${candidate}" \
   || fail "candidate caller does not use the reviewed canonical contract"
 grep -q "if: github.event_name == 'pull_request'" "${candidate}" \
   || fail "candidate validation is not restricted to pull requests"
@@ -104,7 +105,7 @@ grep -qx '  workflow_dispatch:' "${release}" || fail "stable promotion is not ex
   || fail "stable promotion is reachable from merge or pull request"
 ! grep -Eq 'docker (build|bake)|build-push-action|Dockerfile' "${release}" \
   || fail "release caller rebuilds instead of promoting retained digests"
-grep -Fq "container-release.yml@${contract_ref}" "${release}" \
+grep -Fq "container-release.yml@${release_contract_ref}" "${release}" \
   || fail "release caller does not use the reviewed canonical contract"
 grep -qx '  attestations: write' "${release}" \
   || fail "release caller cannot publish a signed release manifest"
