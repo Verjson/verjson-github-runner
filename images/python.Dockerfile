@@ -12,4 +12,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER runner
 ENV PATH=/home/runner/.local/bin:${PATH}
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && python3 --version && uv --version
+  && python3 --version && uv --version
+RUN ["/usr/local/bin/bubblewrap-image-contract"]

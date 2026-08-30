@@ -46,3 +46,4 @@ RUN case "${TARGETARCH}" in \
     pwsh --version
 
 USER runner
+RUN ["/usr/local/bin/bubblewrap-image-contract"]
