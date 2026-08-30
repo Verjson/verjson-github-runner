@@ -19,6 +19,8 @@ ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 ENV VERJSON_CHANGELOG_TOOL_CACHE=/opt/verjson/changelog-tools
 
+COPY --chmod=0555 scripts/bubblewrap-image-contract.py /usr/local/bin/bubblewrap-image-contract
+
 # Install every standard utility exercised by the portable ci admission contract.
 #
 # build-essential and pkg-config belong to that contract rather than to a language
@@ -29,7 +31,7 @@ ENV VERJSON_CHANGELOG_TOOL_CACHE=/opt/verjson/changelog-tools
 # its own CMake when it does; add the package (a further 96 MB) when a real consumer
 # proves that download unreliable, not before.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash build-essential ca-certificates coreutils curl diffutils findutils \
+      bash bubblewrap build-essential ca-certificates coreutils curl diffutils findutils \
       gawk git grep gzip jq pkg-config python3 python3-yaml sed shellcheck sudo tar \
       unzip xz-utils zstd \
     && rm -rf /var/lib/apt/lists/*
@@ -106,4 +108,5 @@ RUN case "${TARGETARCH}" in \
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 USER runner
+RUN ["/usr/local/bin/bubblewrap-image-contract"]
 ENTRYPOINT ["/entrypoint.sh"]

@@ -15,3 +15,4 @@ ENV PATH=/usr/local/go/bin:/home/runner/go/bin:${PATH} \
     GOPATH=/home/runner/go
 
 USER runner
+RUN ["/usr/local/bin/bubblewrap-image-contract"]

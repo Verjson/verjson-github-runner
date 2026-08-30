@@ -26,6 +26,8 @@ jobs:
         run: bash scripts/container-release-contract.test.sh
       - name: Validate pull request image build check contract
         run: bash tests/image_build_check_workflow_test.sh
+      - name: Validate standard image Bubblewrap contract
+        run: python3 tests/bubblewrap_image_contract_test.py
       - name: Validate read-only cache inventory measurement
         run: bash tests/cache_inventory_test.sh
       - name: Validate fail-closed GHCR retention policy

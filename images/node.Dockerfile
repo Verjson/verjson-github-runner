@@ -12,3 +12,4 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && node --version && npm --version
 
 USER runner
+RUN ["/usr/local/bin/bubblewrap-image-contract"]
