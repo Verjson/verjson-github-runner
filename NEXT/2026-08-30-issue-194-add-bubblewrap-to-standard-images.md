@@ -1,6 +1,7 @@
 ---
 date: 2026-08-30
 issue: 194
+impact: patch
 title: Add Bubblewrap to standard runner images
 ---
 
