@@ -1,6 +1,6 @@
 # GENERATED FILE — do not edit by hand.
 # Regenerate with:
-#   scripts/gen-gate-rearm-caller.sh b77e4990bf5bb0aa199784d45749ddd757804ac1 > .github/workflows/gate-rearm.yml
+#   scripts/gen-gate-rearm-caller.sh 2d1ea177fdafe361f9369526cbab8bc05f9e476d > .github/workflows/gate-rearm.yml
 #
 # Thin caller for the immutable gate re-arm bridge in Verjson/.github.
 name: gate re-arm
@@ -25,7 +25,7 @@ jobs:
       checks: write
       issues: write
       pull-requests: write
-    uses: Verjson/.github/.github/workflows/gate-rearm.yml@b77e4990bf5bb0aa199784d45749ddd757804ac1
+    uses: Verjson/.github/.github/workflows/gate-rearm.yml@2d1ea177fdafe361f9369526cbab8bc05f9e476d
     secrets: inherit
     with:
       ai_review_environment: ai-review-app
