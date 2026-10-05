@@ -7,5 +7,6 @@ impact: patch
 
 Align the container candidate configuration with GitHub's reported repository
 name so the canonical validator accepts pull request builds. Invoke the pinned
-changelog cache script with Bash directly so the Ubuntu 26.04 arm64 build does
-not fail its `env` executable-name check under QEMU.
+changelog cache script with Bash and the bundled npm CLI with Node directly so
+the Ubuntu 26.04 arm64 build does not fail its `env` executable-name check
+under QEMU.

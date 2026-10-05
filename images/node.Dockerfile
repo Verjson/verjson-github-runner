@@ -16,9 +16,9 @@ RUN rm -f /usr/local/bin/ensure-bubblewrap /usr/local/bin/install-bubblewrap \
 
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g pnpm yarn \
+    && node "$(command -v npm)" install -g pnpm yarn \
     && rm -rf /var/lib/apt/lists/* \
-    && node --version && npm --version
+    && node --version && node "$(command -v npm)" --version
 
 COPY --chmod=0444 images/bubblewrap-provenance.json /etc/verjson-bubblewrap-provenance.json
 COPY --chmod=0555 scripts/bubblewrap-image-contract.py /usr/local/bin/bubblewrap-image-contract
