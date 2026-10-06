@@ -78,7 +78,7 @@ RUN case "${TARGETARCH}" in \
     tar -xJf "/tmp/${NODE_ARCHIVE}" -C /usr/local --strip-components=1; \
     rm -f "/tmp/${NODE_ARCHIVE}"; \
     node --version; \
-    npm --version
+    node "$(command -v npm)" --version
 
 # Docker CLI + buildx + compose plugins, so runners can run `docker build --secret`
 # (needs BuildKit/buildx) and `docker compose` against the mounted host socket.
