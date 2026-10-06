@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "repository": "Verjson/verjson-git-runners",
+  "repository": "verJSON/verjson-git-runners",
   "registryNamespace": "ghcr.io/verjson",
   "nextStableVersion": "1.0.0",
   "images": [
