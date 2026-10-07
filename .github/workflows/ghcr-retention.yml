@@ -51,7 +51,7 @@ jobs:
             jq -r '"- Plan: `" + .plan_sha256 + "`\n- Observation chain: " + .observation_chain.status + "\n- Versions: " + (.counts.versions|tostring) + "\n- Referenced untagged dependencies: " + (.counts.reachable_untagged_dependencies|tostring) + "\n- Unreachable untagged versions: " + (.counts.unreachable_untagged|tostring) + "\n- Provisional policy candidates: " + (.counts.candidates|tostring) + "\n- Pruning authorized: " + (.pruning_authorized|tostring)' ghcr-retention-plan.json
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload auditable dry-run plan
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ghcr-retention-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: ghcr-retention-plan.json
@@ -67,7 +67,7 @@ jobs:
             jq -r '"- Preview: `" + .preview_sha256 + "`\n- Dry run: " + (.dry_run|tostring) + "\n- Deletion authorized: " + (.deletion_authorized|tostring) + "\n- Held requests: " + (.delete_requests|length|tostring)' ghcr-retention-preview.json
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload held deletion preview
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ghcr-retention-preview-${{ github.run_id }}-${{ github.run_attempt }}
           path: ghcr-retention-preview.json
