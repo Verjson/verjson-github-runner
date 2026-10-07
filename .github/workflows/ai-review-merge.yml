@@ -1,6 +1,6 @@
 # GENERATED FILE — do not edit by hand.
 # Regenerate with:
-#   scripts/gen-ai-review-caller.sh 2d1ea177fdafe361f9369526cbab8bc05f9e476d > .github/workflows/ai-review-merge.yml
+#   scripts/gen-ai-review-caller.sh b77e4990bf5bb0aa199784d45749ddd757804ac1 > .github/workflows/ai-review-merge.yml
 name: AI review
 run-name: AI review authorization ${{ inputs.authorization_check_id }} from arm ${{ inputs.arm_run_id }}.${{ inputs.arm_run_attempt }}
 
@@ -40,11 +40,11 @@ permissions:
 
 jobs:
   review:
-    uses: Verjson/.github/.github/workflows/ai-review-merge.yml@2d1ea177fdafe361f9369526cbab8bc05f9e476d
+    uses: Verjson/.github/.github/workflows/ai-review-merge.yml@b77e4990bf5bb0aa199784d45749ddd757804ac1
     secrets: inherit
     with:
       ai_review_environment: ai-review-app
-      contract_ref: 2d1ea177fdafe361f9369526cbab8bc05f9e476d
+      contract_ref: b77e4990bf5bb0aa199784d45749ddd757804ac1
       pr_number: ${{ inputs.pr_number }}
       expected_head_sha: ${{ inputs.expected_head_sha }}
       authorization_check_id: ${{ inputs.authorization_check_id }}

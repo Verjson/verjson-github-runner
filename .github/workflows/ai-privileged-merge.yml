@@ -1,6 +1,6 @@
 # GENERATED FILE — do not edit by hand.
 # Regenerate with:
-#   scripts/gen-privileged-merge-caller.sh 2d1ea177fdafe361f9369526cbab8bc05f9e476d \[\{\"name\":\"shell-tests\"\,\"app_id\":15368\,\"workflow_id\":319611670\,\"workflow_path\":\".github/workflows/test.yml\"\}\,\{\"name\":\"changelog\ /\ validate\"\,\"app_id\":15368\,\"workflow_id\":325336751\,\"workflow_path\":\".github/workflows/changelog.yml\"\}\] > .github/workflows/ai-privileged-merge.yml
+#   scripts/gen-privileged-merge-caller.sh b77e4990bf5bb0aa199784d45749ddd757804ac1 \[\{\"name\":\"shell-tests\"\,\"app_id\":15368\,\"workflow_id\":319611670\,\"workflow_path\":\".github/workflows/test.yml\"\}\,\{\"name\":\"changelog\ /\ validate\"\,\"app_id\":15368\,\"workflow_id\":325336751\,\"workflow_path\":\".github/workflows/changelog.yml\"\}\] > .github/workflows/ai-privileged-merge.yml
 #
 # Thin caller for the canonical privileged merge (Verjson/.github). All trust
 # logic lives there; nothing here may re-implement it.
@@ -48,7 +48,7 @@ jobs:
   # "<caller job> / <callee job>" and both workflows exclude that shape.
   # Renaming it makes the gate wait on its own continuation.
   privileged_merge:
-    uses: Verjson/.github/.github/workflows/ai-privileged-merge.yml@2d1ea177fdafe361f9369526cbab8bc05f9e476d
+    uses: Verjson/.github/.github/workflows/ai-privileged-merge.yml@b77e4990bf5bb0aa199784d45749ddd757804ac1
     secrets: inherit
     # The callee reads its caller-owned environment secret directly.
     with:
