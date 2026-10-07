@@ -35,6 +35,21 @@ UID, seccomp, image restrictions, resource limits and cleanup. Publication also
 requires the separately approved OIDC broker and plan/evidence acceptance; this
 manifest contains no registry publisher credentials or broker deployment.
 
+Before activating signed candidate or release work, run a protected-main WEB job
+through this runner and retain its job and pod receipts. Verify the admitted build,
+helper and runtime image digests; UID 1001; dropped capabilities; the exact seccomp
+and AppArmor profiles; no mounted service-account token, host socket or writable
+host path; and cleanup of the job-scoped image-pull Secret. Inside that job, require
+the root-owned, non-writable `/usr/bin/bwrap` and exercise the supervisor's actual
+user/PID/network/IPC/UTS sandbox with fresh proc, dev and tmp filesystems and no
+nested user namespaces. Prove `.git`, the host home, the outer proc filesystem,
+runner scripts, acquisition inputs, credentials and sibling jobs are hidden,
+with only the task output directory writable. Retain signed acquisition denial,
+expiry and rollback receipts. Any failed assertion blocks activation; a manually
+created pod or host image probe
+cannot establish the native job's credential and isolation boundaries. Issue #208
+tracks the current live failure and the remaining acceptance evidence.
+
 The live K3s canary observed a policy convergence window for newly created pods:
 initial TCP connections to the Kubernetes API succeeded, while unauthenticated
 pod/Secret requests returned HTTP 401; a later probe found both API connections
